@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LeadGen Command Center</title>
+  <link rel="stylesheet" href="css/dashboard.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+</head>
+<body>
+
+  <!-- Background Effects -->
+  <div class="bg-grid"></div>
+
+  <div class="app-container">
+
+    <!-- HEADER -->
+    <header class="app-header">
+      <div class="logo">
+        <div class="logo-icon">⚡</div>
+        <div class="logo-text"><span>LeadGen</span> Command Center</div>
+      </div>
+      <div class="header-actions">
+        <button class="btn btn-secondary btn-sm" onclick="importCSV()">📁 Load Pipeline Data</button>
+        <button class="btn btn-primary btn-sm" onclick="exportVerifiedCSV()">📥 Export Verified for Dispatch</button>
+        <button class="btn btn-success btn-sm" onclick="sendApprovedEmails()">📧 Send Approved Emails</button>
+      </div>
+    </header>
+
+    <!-- NEW CAMPAIGN LAUNCHER -->
+    <div class="glass-card campaign-card">
+      <div class="card-header">
+        <div class="card-title">🚀 New Campaign</div>
+        <div class="card-subtitle">Describe who you're targeting — the engine scrapes, audits, and drafts outreach automatically.</div>
+      </div>
+
+      <div class="campaign-form">
+        <div class="form-group form-group-wide">
+          <label class="form-label">Search query <span class="label-hint">(optional — narrows results by business name)</span></label>
+          <input type="text" class="form-input" id="campaign-query" placeholder="e.g. family-run, boutique, 24-hour…">
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">State</label>
+          <select class="form-input" id="campaign-state"></select>
+        </div>
+
+        <div class="form-group">
+          <label class="form-label">City <span class="label-hint">(strongly recommended — state-wide searches are much slower and can time out)</span></label>
+          <input type="text" class="form-input" id="campaign-city" placeholder="e.g. Wilmington">
+        </div>
+
+        <div class="form-group form-group-wide">
+          <label class="form-label">Categories <span class="label-hint">(pick one or more — defaults to all)</span></label>
+          <div class="category-picker" id="category-picker"></div>
+        </div>
+      </div>
+
+      <div class="campaign-footer">
+        <div class="campaign-progress" id="campaign-progress" style="display:none">
+          <div class="progress-bar"><div class="progress-fill" id="campaign-progress-fill"></div></div>
+          <div class="progress-message" id="campaign-progress-message">Starting…</div>
+        </div>
+        <button class="btn btn-primary" id="btn-run-campaign" onclick="runCampaign()">⚡ Run Campaign</button>
+      </div>
+    </div>
+
+    <!-- STATS ROW -->
+    <div class="stats-row">
+      <div class="stat-card">
+        <div class="stat-icon">📊</div>
+        <div class="stat-label">Total Leads</div>
+        <div class="stat-value" id="stat-total">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">🌐</div>
+        <div class="stat-label">No Website</div>
+        <div class="stat-value" id="stat-noweb">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">⚠️</div>
+        <div class="stat-label">Website Upgrade</div>
+        <div class="stat-value" id="stat-upgrade">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-icon">✅</div>
+        <div class="stat-label">Verified & Ready</div>
+        <div class="stat-value" id="stat-verified">0</div>
+      </div>
+    </div>
+
+    <!-- MAIN DATA GRID -->
+    <div class="data-grid-container glass-card">
+      <div class="card-header">
+        <div class="card-title">📋 Triage Queue</div>
+      </div>
+      <div class="table-container">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Business Name</th>
+              <th>Contact</th>
+              <th>Strategy</th>
+              <th>Audit Context</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody id="leads-tbody">
+            <tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:2rem;">Load pipeline data to begin triage.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- SLIDE-OUT REVIEW PANEL -->
+  <div class="slide-panel-overlay" id="review-panel-overlay" onclick="closeReviewPanel()"></div>
+  <div class="slide-panel" id="review-panel">
+    <div class="panel-header">
+      <h3>Email Review</h3>
+      <button class="btn-icon" onclick="closeReviewPanel()">✖</button>
+    </div>
+    <div class="panel-body">
+      
+      <div class="review-meta">
+        <h2 id="review-biz-name">Business Name</h2>
+        <div class="badge-container" id="review-strategy-badge"></div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Audit Context</label>
+        <div class="audit-box" id="review-audit-box">No flaws detected.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Subject</label>
+        <input type="text" class="form-input" id="review-subject" readonly>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Email Body</label>
+        <textarea class="form-textarea email-textarea" id="review-body" readonly></textarea>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Demo Site URL</label>
+        <div style="display:flex;gap:var(--space-sm);align-items:center">
+          <input type="text" class="form-input code-input" id="review-demo-url" readonly>
+          <a class="btn btn-secondary btn-sm" id="review-demo-link" href="#" target="_blank">↗ View</a>
+        </div>
+      </div>
+
+    </div>
+    <div class="panel-footer">
+      <button class="btn btn-secondary" onclick="closeReviewPanel()">Cancel</button>
+      <button class="btn btn-primary" id="btn-approve" onclick="approveCurrentLead()">✅ Approve & Mark Ready</button>
+    </div>
+  </div>
+
+  <!-- TOAST CONTAINER -->
+  <div class="toast-container" id="toast-container"></div>
+
+  <!-- Hidden file input for CSV import -->
+  <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCSVImport(event)">
+
+  <script src="js/app.js"></script>
+  <script src="js/campaign.js"></script>
+
+</body>
+</html>

@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Your Live Audit | Pulsfi</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+<script>
+  // Hot-lead engagement tracking (optional — page works fine if unset).
+  // Fill this in once you deploy scripts/api_server.py somewhere publicly
+  // reachable (e.g. a small Railway/Render/VPS instance), and this page
+  // will beacon back the moment a lead opens it — enough for an instant
+  // email alert while the lead is still hot. Leave blank to disable.
+  window.PULSFI_TRACK_ENDPOINT = "";
+</script>
+</head>
+<body>
+
+<!-- Loading sequence: makes the page feel like an on-demand scan running,
+     not a static page you clicked into. Text below is replaced with the
+     real business/city as soon as URL params are parsed. -->
+<div id="loader">
+  <div class="loader-box">
+    <div class="loader-mark"><span class="blink"></span>PULSFI LIVE AUDIT</div>
+    <div class="loader-lines" id="loaderLines"></div>
+    <div class="loader-bar-track"><div class="loader-bar-fill" id="loaderBarFill"></div></div>
+  </div>
+</div>
+
+<div class="grain"></div>
+<div class="orb orb-1"></div>
+<div class="orb orb-2"></div>
+
+<div class="layout">
+
+  <!-- ============================================================ LEFT: sticky hook + close -->
+  <aside class="panel-left">
+    <div class="brand-row">
+      <span class="brand-mark">◆</span><span>Pulsfi</span>
+      <span class="scan-badge"><span class="dot"></span>Live report</span>
+    </div>
+
+    <div class="hero-copy">
+      <p class="eyebrow">Personalized digital audit for</p>
+      <h1 id="dynamicHeroName">Your Business</h1>
+      <p class="hero-loc">📍 <span id="dynamicHeroCity">your area</span></p>
+      <p class="hero-sub">We scanned <span id="dynamicSubName">your brand</span>'s digital footprint in <span id="dynamicCity">your area</span> — here's exactly what it's costing you, and what we already fixed.</p>
+    </div>
+
+    <div class="left-actions">
+      <a href="mailto:info@pulsfi.com" class="btn btn-ghost">✉️ Email us</a>
+      <a href="tel:" id="dynamicPhoneLink" class="btn btn-ghost" style="display:none;">📞 Call now</a>
+    </div>
+
+    <div class="booking-embed" id="bookingEmbed">
+      <div class="booking-label">Grab 15 minutes — pick any slot</div>
+      <div class="calendly-shell">
+        <div class="calendly-skeleton" id="calendlySkeleton">Loading calendar…</div>
+        <div class="calendly-inline-widget"
+             data-url="https://calendly.com/haseeb16905/onboarding-call?hide_gdpr_banner=1&background_color=0d1119&text_color=f2f4f7&primary_color=00e0b8"
+             style="min-width:260px;height:420px;"></div>
+      </div>
+      <a href="https://calendly.com/haseeb16905/onboarding-call" target="_blank" class="calendly-fallback-link" id="calendlyFallback">Open calendar in a new tab →</a>
+    </div>
+
+    <div class="left-footer">
+      <div class="founder-note">
+        <div class="avatar">HB</div>
+        <div>
+          <strong>Haseeb Baig</strong>
+          <span>Founder, Pulsfi — built this myself</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ============================================================ RIGHT: scrollable evidence -->
+  <main class="panel-right">
+
+    <!-- Why you received this -->
+    <section class="section reveal">
+      <div class="section-tag">◆ Why you're seeing this</div>
+      <h2>We ran an analysis on <span id="dynamicAboutStrong">your business</span>'s digital footprint.</h2>
+      <p class="section-lede">Before we reach out to any <span id="dynamicOpsCategory">local business</span> in <span id="dynamicOpsCity">your city</span>, we scan how they show up online — site health, mobile experience, and search visibility — then build a working fix, not just a slide deck.</p>
+      <div class="why-grid">
+        <div class="why-card"><div class="k">Category</div><div class="v" id="dynamicCardCategory">Local Business</div></div>
+        <div class="why-card"><div class="k">Market</div><div class="v" id="dynamicCardCity">Your City</div></div>
+        <div class="why-card"><div class="k">Status</div><div class="v" id="dynamicStatusLabel">Scan complete</div></div>
+      </div>
+    </section>
+
+    <!-- Live audit (website_upgrade branch) -->
+    <section class="section reveal" id="audit-section" style="display:none;">
+      <div class="section-tag">◆ Live audit</div>
+      <h2>Here's exactly what we found.</h2>
+      <p class="section-lede">Scored across security, speed, mobile experience and search visibility — the same checklist that decides whether a visitor becomes a customer or bounces.</p>
+
+      <div class="audit-layout">
+        <div class="gauge-wrap">
+          <svg viewBox="0 0 200 200" width="200" height="200">
+            <circle class="gauge-track" cx="100" cy="100" r="90"></circle>
+            <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="90"></circle>
+          </svg>
+          <div class="gauge-center">
+            <span class="gauge-score" id="auditScore">--</span>
+            <span class="gauge-grade" id="auditGrade"></span>
+          </div>
+        </div>
+        <ul class="audit-issues" id="auditIssues"></ul>
+      </div>
+
+      <div class="audit-chart">
+        <div class="audit-chart-title">Category breakdown</div>
+        <div id="auditChartRows"></div>
+      </div>
+    </section>
+
+    <!-- No-website branch -->
+    <section class="section reveal" id="no-site-section" style="display:none;">
+      <div class="section-tag">◆ Live audit</div>
+      <h2>We couldn't find a working website to audit.</h2>
+      <p class="section-lede">For a <span id="dynamicNoSiteCategory">local business</span>, that's the single biggest missed-lead problem — not a slow site, <em>no</em> site. Every search, every "let me just check them out first" moment goes to a competitor instead.</p>
+      <div class="no-site-box">
+        <h3>What that's costing you</h3>
+        <p>The prototype linked in this page is what a working, mobile-ready storefront for <span id="dynamicNoSiteName">your business</span> looks like — live now, not a mockup.</p>
+      </div>
+    </section>
+
+    <!-- Zig-zag value props -->
+    <section class="section reveal">
+      <div class="section-tag">◆ What we actually do</div>
+      <h2>Three fixes, in the order that matters.</h2>
+
+      <div class="value-row">
+        <div class="value-copy">
+          <span class="index">01 — Fix</span>
+          <h3>Repair what's actively losing you customers</h3>
+          <p>Security, speed and mobile issues first — the ones that make a visitor leave before they even read your pitch.</p>
+        </div>
+        <div class="value-visual">
+          <div class="mock-bar"><div class="mock-bar-fill" style="width:38%"></div></div>
+          <div class="mock-bar"><div class="mock-bar-fill" style="width:71%"></div></div>
+          <div class="mock-dot-row">
+            <span class="mock-dot on"></span><span class="mock-dot on"></span><span class="mock-dot"></span><span class="mock-dot"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="value-row reverse">
+        <div class="value-copy">
+          <span class="index">02 — Enhance</span>
+          <h3>Layer AI on top of what already works</h3>
+          <p>Automated follow-up and lead qualification running on your existing setup — no rip-and-replace required.</p>
+        </div>
+        <div class="value-visual">
+          <div class="mock-bar"><div class="mock-bar-fill" style="width:88%"></div></div>
+          <div class="mock-bar"><div class="mock-bar-fill" style="width:54%"></div></div>
+          <div class="mock-dot-row">
+            <span class="mock-dot on"></span><span class="mock-dot on"></span><span class="mock-dot on"></span><span class="mock-dot"></span>
+          </div>
+        </div>
+      </div>
+
+      <div class="value-row">
+        <div class="value-copy">
+          <span class="index">03 — Assure</span>
+          <h3>Re-audit on a cadence, not a guess</h3>
+          <p>You get the same scorecard shown above, on a schedule — so you see the number move instead of taking our word for it.</p>
+        </div>
+        <div class="value-visual">
+          <div class="mock-bar"><div class="mock-bar-fill" style="width:95%"></div></div>
+          <div class="mock-bar"><div class="mock-bar-fill" style="width:82%"></div></div>
+          <div class="mock-dot-row">
+            <span class="mock-dot on"></span><span class="mock-dot on"></span><span class="mock-dot on"></span><span class="mock-dot on"></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Cost of inaction -->
+    <section class="section reveal">
+      <div class="section-tag">◆ Cost of waiting</div>
+      <h2>What sitting on this actually costs.</h2>
+      <div class="cost-box">
+        <p class="section-lede" style="margin-top:0;">Every week this stays "on the list" is another week <span id="dynamicCostCategory">local competitors</span> in <span id="dynamicCostCity">your city</span> show up first, load faster, and look more credible to the exact customer who was about to call you.</p>
+        <div class="cost-stat-row">
+          <div class="cost-stat"><div class="n">53%</div><div class="l">of visitors leave a site that takes &gt;3s to load</div></div>
+          <div class="cost-stat"><div class="n">75%</div><div class="l">judge credibility by site design alone</div></div>
+          <div class="cost-stat"><div class="n">1st</div><div class="l">page of results gets ~90% of clicks</div></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Trust bar -->
+    <section class="section reveal">
+      <div class="section-tag">◆ Built the same way, every time</div>
+      <h2>The exact process behind this page.</h2>
+      <p class="section-lede">No template swap. Every prototype starts with a real audit, gets fixed in order, then reviewed by a person before it ever reaches you.</p>
+      <div class="trust-row">
+        <span class="trust-mark">Find</span>
+        <span class="trust-mark">Fix</span>
+        <span class="trust-mark">Enhance</span>
+        <span class="trust-mark">Assure</span>
+      </div>
+    </section>
+
+    <!-- Close -->
+    <section class="section reveal close-section">
+      <div class="section-tag">◆ Next step</div>
+      <h2>Claim this design for <span id="dynamicFooterName">your business</span>.</h2>
+      <p class="section-lede">Skip the back-and-forth — book 15 minutes and we deploy this to your domain within 48 hours. The calendar's on the left, or reach us directly.</p>
+      <div class="close-actions">
+        <a href="#bookingEmbed" class="btn btn-primary" onclick="document.getElementById('bookingEmbed').scrollIntoView({behavior:'smooth'})">Book your call ↑</a>
+        <a href="https://pulsfi.com" target="_blank" class="btn btn-ghost">See all Pulsfi services →</a>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<footer class="footer">
+  <p>&copy; <span id="footerYear"></span> Pulsfi Marketing Agency · 📧 info@pulsfi.com · 📞 +92 332 5036111 · 📍 Kohistan Enclave, Wah Cantt</p>
+</footer>
+
+<div class="mobile-sticky-cta">
+  <button onclick="document.getElementById('bookingEmbed').scrollIntoView({behavior:'smooth'})">📅 Book your 15-min call</button>
+</div>
+
+<script src="https://assets.calendly.com/assets/external/widget.js" async></script>
+<script src="js/script.js"></script>
+</body>
+</html>
