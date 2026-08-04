@@ -440,12 +440,14 @@ def send_campaign_emails(job_id: str) -> Any:
 
 
 if __name__ == "__main__":
+    import os
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     from config import GOOGLE_MAPS_API_KEY, GEMINI_API_KEY, GMAIL_ADDRESS
+    port = int(os.environ.get("PORT", 5055))
     logger.info("=" * 60)
-    logger.info("LeadGen API server starting on http://127.0.0.1:5055")
+    logger.info("LeadGen API server starting on http://0.0.0.0:%s", port)
     logger.info("  GEMINI_API_KEY:        %s", "set" if GEMINI_API_KEY else "MISSING")
     logger.info("  GOOGLE_MAPS_API_KEY:   %s", "set" if GOOGLE_MAPS_API_KEY else "MISSING — will use slow OSM fallback")
     logger.info("  GMAIL_ADDRESS:         %s", GMAIL_ADDRESS or "MISSING")
     logger.info("=" * 60)
-    app.run(host="127.0.0.1", port=5055, debug=False)
+    app.run(host="0.0.0.0", port=port, debug=False)
