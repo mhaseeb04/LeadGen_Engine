@@ -762,7 +762,7 @@ def scrape_leads(
     # ------------------------------------------------------------------
     # PRIMARY: Google Places (enterprise path)
     # ------------------------------------------------------------------
-    if GOOGLE_MAPS_API_KEY:
+        if GOOGLE_MAPS_API_KEY:
         logger.info("Using Google Places API for lead discovery (key present).")
         try:
             records = scrape_google_places(
@@ -773,6 +773,14 @@ def scrape_leads(
                 api_key=GOOGLE_MAPS_API_KEY,
                 max_results=60,
             )
+        except PlacesAPIError as exc:
+            # Billing / quota / denied — do NOT silently fall back to OSM.
+            # OSM would also return empty and hide the real problem.
+            logger.error("Google Places hard failure: %s", exc)
+            raise RuntimeError(
+                f"Google Places API error ({exc.status}): {exc.message}. "
+                "Enable Billing + Places API on Google Cloud, then retry."
+            ) from exc
         except Exception:
             logger.exception("Google Places discovery failed — will try OSM fallback.")
             records = []
