@@ -123,7 +123,7 @@ def run_pipeline(
         pass
 
     scrape_csv: Path = DATA_DIR / f"{state.lower().replace(' ', '_')}_leads.csv"
-    try:
+        try:
         scrape_csv = scrape_leads(
             state=state,
             categories=categories,
@@ -142,6 +142,10 @@ def run_pipeline(
         summary["leads_scraped"] = len(df)
         summary["scrape_csv"] = str(scrape_csv)
         logger.info("Phase 1 complete — %d leads scraped.", len(df))
+    except RuntimeError:
+        # Places billing/denied — re-raise so the API marks the job as error
+        # with a clear message instead of a silent empty result.
+        raise
     except Exception:
         logger.exception("Phase 1 FAILED.")
         return summary
