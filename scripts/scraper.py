@@ -57,20 +57,20 @@ PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 PLACES_MAX_PAGES = 3          # 20 results per page → up to 60 leads per query
 PLACES_PAGE_DELAY = 2.1       # Google requires ~2s before using next_page_token
 
-# Human-readable search terms for each category_id (used by Google Places)
+# One strong term per category (faster). Add more only when needed.
 CATEGORY_SEARCH_TERMS: dict[str, list[str]] = {
-    "real_estate": ["real estate agency", "realtor", "estate agent"],
-    "restaurants_cafes": ["restaurant", "cafe", "coffee shop"],
-    "bars_nightlife": ["bar", "pub", "nightclub"],
-    "beauty_salons": ["beauty salon", "hair salon", "barber"],
-    "health_medical": ["dentist", "medical clinic", "doctor", "pharmacy"],
-    "veterinary": ["veterinary clinic", "animal hospital", "vet"],
-    "automotive": ["auto repair", "car dealership", "tire shop"],
-    "legal_professional": ["lawyer", "attorney", "accountant", "insurance agency"],
-    "retail_shopping": ["bakery", "florist", "clothing store"],
-    "fitness_wellness": ["gym", "fitness center", "yoga studio", "massage"],
-    "construction_trades": ["general contractor", "construction company", "hardware store"],
-    "hospitality": ["hotel", "motel", "guest house", "inn"],
+    "real_estate": ["real estate agency"],
+    "restaurants_cafes": ["restaurant"],
+    "bars_nightlife": ["bar"],
+    "beauty_salons": ["beauty salon"],
+    "health_medical": ["medical clinic"],
+    "veterinary": ["veterinary clinic"],
+    "automotive": ["auto repair"],
+    "legal_professional": ["lawyer"],
+    "retail_shopping": ["clothing store"],
+    "fitness_wellness": ["gym"],
+    "construction_trades": ["general contractor"],
+    "hospitality": ["hotel"],
 }
 
 
@@ -101,17 +101,28 @@ def _places_search_terms(category_ids: list[str] | None, query_text: str | None)
     return unique
 
 
+class PlacesAPIError(Exception):
+    """Raised when Google Places returns a hard failure (billing, denied, quota)."""
+    def __init__(self, status: str, message: str):
+        self.status = status
+        self.message = message
+        super().__init__(f"{status}: {message}")
+
+
 def _places_text_search(
     query: str,
     api_key: str,
     max_pages: int = PLACES_MAX_PAGES,
 ) -> list[dict[str, Any]]:
-    """Run Google Places Text Search with pagination. Returns raw result dicts."""
+    """Run Google Places Text Search with pagination.
+
+    Raises PlacesAPIError on REQUEST_DENIED / OVER_QUERY_LIMIT so the
+    pipeline can surface a clear message instead of silent zero results.
+    """
     results: list[dict[str, Any]] = []
     params: dict[str, str] = {
         "query": query,
         "key": api_key,
-        "type": "",  # leave empty; query already carries the intent
     }
     page = 0
     next_token: str | None = None
@@ -130,14 +141,23 @@ def _places_text_search(
             break
 
         status = data.get("status", "")
+        error_msg = data.get("error_message", "") or ""
+
+        if status == "REQUEST_DENIED":
+            raise PlacesAPIError(
+                status,
+                error_msg or "Places API denied. Enable Billing + Places API on Google Cloud.",
+            )
+        if status == "OVER_QUERY_LIMIT":
+            raise PlacesAPIError(
+                status,
+                error_msg or "Places API quota exceeded. Wait or upgrade quota.",
+            )
         if status not in ("OK", "ZERO_RESULTS"):
             logger.warning(
                 "Places Text Search status=%s for %r — %s",
-                status, query, data.get("error_message", ""),
+                status, query, error_msg,
             )
-            if status in ("OVER_QUERY_LIMIT", "REQUEST_DENIED"):
-                break
-            # For other transient statuses continue / stop gracefully
             break
 
         page_results = data.get("results", [])
