@@ -61,6 +61,9 @@ from pathlib import Path
 from typing import Any
 
 import pandas as pd
+import os
+from functools import wraps
+
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
@@ -71,6 +74,33 @@ logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
 CORS(app)  # dashboard/demo-site are served from different origins during local dev
+
+# ---------------------------------------------------------------------------
+# API authentication (commercial-grade gate)
+# Set API_SECRET in Render Environment Variables.
+# Dashboard must send header:  X-API-Key: <same secret>
+# If API_SECRET is empty, auth is disabled (local dev only).
+# ---------------------------------------------------------------------------
+API_SECRET: str = os.environ.get("API_SECRET", "").strip()
+
+
+def require_api_key(fn):
+    """Protect write/sensitive endpoints. Public GETs (states, categories, health) stay open."""
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not API_SECRET:
+            # Dev mode: no secret configured — allow (log once would be noisy)
+            return fn(*args, **kwargs)
+        key = (
+            request.headers.get("X-API-Key")
+            or request.headers.get("x-api-key")
+            or ""
+        ).strip()
+        if key != API_SECRET:
+            return jsonify({"error": "Unauthorized — invalid or missing X-API-Key"}), 401
+        return fn(*args, **kwargs)
+    return wrapper
+
 
 # ---------------------------------------------------------------------------
 # In-memory job store. Swap for a DB-backed table when moving beyond a
@@ -153,6 +183,7 @@ def _start_job(params: dict[str, Any]) -> str:
 # Routes
 # ---------------------------------------------------------------------------
 @app.post("/api/contact")
+@require_api_key
 def contact() -> Any:
     """Receive an inbound lead from the agency-site contact form and
     append it to ``data/inbound_contacts.csv``. Kept intentionally simple
@@ -313,6 +344,7 @@ def states() -> Any:
 
 
 @app.post("/api/campaigns")
+@require_api_key
 def create_campaign() -> Any:
     body = request.get_json(force=True, silent=True) or {}
 
@@ -363,6 +395,7 @@ def get_campaign_leads(job_id: str) -> Any:
 
 
 @app.post("/api/campaigns/<job_id>/send_emails")
+@require_api_key
 def send_campaign_emails(job_id: str) -> Any:
     with JOBS_LOCK:
         job = JOBS.get(job_id)
