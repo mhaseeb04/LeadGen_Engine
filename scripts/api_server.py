@@ -463,7 +463,7 @@ def create_campaign() -> Any:
 
 @app.get("/api/campaigns/<job_id>")
 def get_campaign(job_id: str) -> Any:
-        with JOBS_LOCK:
+    with JOBS_LOCK:
         with _db() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         job = _row_to_job(row) if row else None
@@ -474,7 +474,7 @@ def get_campaign(job_id: str) -> Any:
 
 @app.get("/api/campaigns/<job_id>/leads")
 def get_campaign_leads(job_id: str) -> Any:
-        with JOBS_LOCK:
+    with JOBS_LOCK:
         with _db() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         job = _row_to_job(row) if row else None
@@ -483,7 +483,6 @@ def get_campaign_leads(job_id: str) -> Any:
     if job["status"] != "done" or not job.get("summary"):
         return jsonify({"error": "Job not finished yet", "status": job["status"]}), 409
 
-    # Prefer the richest CSV available (with emails > enriched > raw scrape)
     csv_path = (
         job["summary"].get("email_csv")
         or job["summary"].get("enriched_csv")
@@ -499,7 +498,7 @@ def get_campaign_leads(job_id: str) -> Any:
 @app.post("/api/campaigns/<job_id>/send_emails")
 @require_api_key
 def send_campaign_emails(job_id: str) -> Any:
-        with JOBS_LOCK:
+    with JOBS_LOCK:
         with _db() as conn:
             row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
         job = _row_to_job(row) if row else None
@@ -512,11 +511,6 @@ def send_campaign_emails(job_id: str) -> Any:
     if not email_csv_path or not Path(email_csv_path).exists():
         return jsonify({"error": "No emails generated for this job"}), 404
 
-    # Restrict sending to exactly the leads the operator approved in
-    # Triage — matched by email address. Previously this field was sent
-    # by the dashboard but never read here, so "Send Approved Emails"
-    # actually sent to every eligible lead in the whole campaign,
-    # regardless of what was approved.
     body = request.get_json(force=True, silent=True) or {}
     approved_leads = body.get("leads") or []
     approved_emails = {
