@@ -48,7 +48,8 @@ swapped for a real queue (Celery/RQ + Redis) and the in-memory `JOBS`
 dict swapped for Postgres/SQLite without touching any route handler —
 each route only talks to `_start_job`, `_get_job`, and `_list_job_leads`.
 """
-
+import json
+import sqlite3
 from __future__ import annotations
 
 import csv
@@ -103,11 +104,59 @@ def require_api_key(fn):
 
 
 # ---------------------------------------------------------------------------
-# In-memory job store. Swap for a DB-backed table when moving beyond a
-# single-operator local deployment (see module docstring).
+# SQLite job store (survives Render restarts)
 # ---------------------------------------------------------------------------
-JOBS: dict[str, dict[str, Any]] = {}
 JOBS_LOCK = threading.Lock()
+DB_PATH = Path(os.environ.get("JOBS_DB_PATH", str(DATA_DIR / "jobs.db")))
+
+
+def _db() -> sqlite3.Connection:
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def _init_db() -> None:
+    with _db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS jobs (
+                id TEXT PRIMARY KEY,
+                params_json TEXT NOT NULL,
+                status TEXT NOT NULL,
+                phase TEXT,
+                message TEXT,
+                log_json TEXT,
+                summary_json TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at)"
+        )
+
+
+_init_db()
+
+
+def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "params": json.loads(row["params_json"] or "{}"),
+        "status": row["status"],
+        "phase": row["phase"] or "queued",
+        "message": row["message"] or "",
+        "log": json.loads(row["log_json"] or "[]"),
+        "summary": json.loads(row["summary_json"]) if row["summary_json"] else None,
+        "error": row["error"],
+    }
 
 # ---------------------------------------------------------------------------
 # Hot-lead alert debounce. A visitor scrolling/re-rendering the demo page
@@ -123,32 +172,81 @@ ALERT_DEBOUNCE_SECONDS = 30 * 60  # one alert per lead per 30 minutes
 
 def _new_job(params: dict[str, Any]) -> str:
     job_id = uuid.uuid4().hex[:12]
+    now = datetime.now(timezone.utc).isoformat()
     with JOBS_LOCK:
-        JOBS[job_id] = {
-            "id": job_id,
-            "params": params,
-            "status": "queued",   # queued -> running -> done | error
-            "phase": "queued",
-            "message": "Waiting to start…",
-            "log": [],
-            "summary": None,
-            "error": None,
-        }
+        with _db() as conn:
+            conn.execute(
+                """
+                INSERT INTO jobs (id, params_json, status, phase, message, log_json, summary_json, error, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
+                """,
+                (
+                    job_id,
+                    json.dumps(params),
+                    "queued",
+                    "queued",
+                    "Waiting to start…",
+                    "[]",
+                    now,
+                    now,
+                ),
+            )
     return job_id
 
 
 def _update_job(job_id: str, **fields: Any) -> None:
+    allowed = {"status", "phase", "message", "summary", "error", "log"}
+    cols = []
+    vals: list[Any] = []
+    for k, v in fields.items():
+        if k not in allowed:
+            continue
+        if k == "summary":
+            cols.append("summary_json = ?")
+            vals.append(json.dumps(v) if v is not None else None)
+        elif k == "log":
+            cols.append("log_json = ?")
+            vals.append(json.dumps(v))
+        else:
+            cols.append(f"{k} = ?")
+            vals.append(v)
+    if not cols:
+        return
+    cols.append("updated_at = ?")
+    vals.append(datetime.now(timezone.utc).isoformat())
+    vals.append(job_id)
     with JOBS_LOCK:
-        if job_id in JOBS:
-            JOBS[job_id].update(fields)
+        with _db() as conn:
+            conn.execute(
+                f"UPDATE jobs SET {', '.join(cols)} WHERE id = ?",
+                vals,
+            )
 
 
 def _append_log(job_id: str, phase: str, message: str) -> None:
     with JOBS_LOCK:
-        if job_id in JOBS:
-            JOBS[job_id]["phase"] = phase
-            JOBS[job_id]["message"] = message
-            JOBS[job_id]["log"].append({"phase": phase, "message": message})
+        with _db() as conn:
+            row = conn.execute(
+                "SELECT log_json FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+            if not row:
+                return
+            log = json.loads(row["log_json"] or "[]")
+            log.append({"phase": phase, "message": message})
+            conn.execute(
+                """
+                UPDATE jobs
+                SET phase = ?, message = ?, log_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    phase,
+                    message,
+                    json.dumps(log),
+                    datetime.now(timezone.utc).isoformat(),
+                    job_id,
+                ),
+            )
 
 
 def _run_job(job_id: str, params: dict[str, Any]) -> None:
@@ -365,8 +463,10 @@ def create_campaign() -> Any:
 
 @app.get("/api/campaigns/<job_id>")
 def get_campaign(job_id: str) -> Any:
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
+        with JOBS_LOCK:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        job = _row_to_job(row) if row else None
     if not job:
         return jsonify({"error": "Unknown job_id"}), 404
     return jsonify(job)
@@ -374,8 +474,10 @@ def get_campaign(job_id: str) -> Any:
 
 @app.get("/api/campaigns/<job_id>/leads")
 def get_campaign_leads(job_id: str) -> Any:
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
+        with JOBS_LOCK:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        job = _row_to_job(row) if row else None
     if not job:
         return jsonify({"error": "Unknown job_id"}), 404
     if job["status"] != "done" or not job.get("summary"):
@@ -397,8 +499,10 @@ def get_campaign_leads(job_id: str) -> Any:
 @app.post("/api/campaigns/<job_id>/send_emails")
 @require_api_key
 def send_campaign_emails(job_id: str) -> Any:
-    with JOBS_LOCK:
-        job = JOBS.get(job_id)
+        with JOBS_LOCK:
+        with _db() as conn:
+            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        job = _row_to_job(row) if row else None
     if not job:
         return jsonify({"error": "Unknown job_id"}), 404
     if job["status"] != "done" or not job.get("summary"):
