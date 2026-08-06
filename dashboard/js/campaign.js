@@ -71,8 +71,12 @@ async function runCampaign() {
   const city = document.getElementById('campaign-city').value.trim();
   const query = document.getElementById('campaign-query').value.trim();
 
-  if (!state) {
+    if (!state) {
     showToast('Pick a state to scrape first.', 'error');
+    return;
+  }
+  if (!city) {
+    showToast('City is required for fast, accurate results.', 'error');
     return;
   }
 
