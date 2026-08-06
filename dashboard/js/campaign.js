@@ -5,7 +5,19 @@
  * triage table (AppState from app.js) — no manual CSV export/import step.
  */
 
-const API_BASE = window.LEADGEN_API_BASE || 'http://127.0.0.1:5055';
+const API_BASE = window.LEADGEN_API_BASE || 'https://leadgen-engine-ngxx.onrender.com';
+
+// Must match API_SECRET on Render. For a static dashboard this is visible
+// in page source — still blocks random scrapers; upgrade to login later.
+const API_KEY = window.LEADGEN_API_KEY || 'CHANGE_ME_TO_A_LONG_RANDOM_SECRET';
+
+function apiHeaders(extra) {
+  const h = Object.assign({ 'Content-Type': 'application/json' }, extra || {});
+  if (API_KEY && API_KEY !== 'CHANGE_ME_TO_A_LONG_RANDOM_SECRET') {
+    h['X-API-Key'] = API_KEY;
+  }
+  return h;
+}
 
 const CampaignState = {
   selectedCategories: new Set(),
@@ -76,9 +88,9 @@ async function runCampaign() {
   progressFill.style.width = '5%';
 
   try {
-    const res = await fetch(`${API_BASE}/api/campaigns`, {
+      const res = await fetch(`${API_BASE}/api/campaigns`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: apiHeaders(),
       body: JSON.stringify({
         state,
         city,
