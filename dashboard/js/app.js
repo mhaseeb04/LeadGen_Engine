@@ -259,25 +259,29 @@ async function sendApprovedEmails() {
     return;
   }
 
+  // Use same API base + key as campaign.js
+  const base = (typeof API_BASE !== 'undefined' && API_BASE)
+    ? API_BASE
+    : (window.LEADGEN_API_BASE || 'https://leadgen-engine-ngxx.onrender.com');
+  const headers = (typeof apiHeaders === 'function')
+    ? apiHeaders()
+    : { 'Content-Type': 'application/json' };
+
   try {
-    const response = await fetch(`/api/campaigns/${jobId}/send_emails`, {
+    const response = await fetch(`${base}/api/campaigns/${jobId}/send_emails`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      // The backend filters the full generated-email CSV down to just
-      // these approved leads (matched by email address) before sending —
-      // it does NOT send to every eligible lead in the campaign.
-      body: JSON.stringify({ leads: verified.map(l => ({ email: l.email, name: l.name })) }),
+      headers,
+      body: JSON.stringify({
+        leads: verified.map(l => ({ email: l.email, name: l.name })),
+      }),
     });
 
-    const result = await response.json();
+    const result = await response.json().catch(() => ({}));
 
     if (response.ok) {
-      showToast(result.status, 'success');
-      // Optionally update UI to show sending status
+      showToast(result.status || 'Send started', 'success');
     } else {
-      showToast(`Error sending emails: ${result.error}`, 'error');
+      showToast(`Error sending emails: ${result.error || response.status}`, 'error');
     }
   } catch (error) {
     console.error('Error sending emails:', error);
