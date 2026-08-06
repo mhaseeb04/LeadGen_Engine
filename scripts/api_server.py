@@ -48,23 +48,22 @@ swapped for a real queue (Celery/RQ + Redis) and the in-memory `JOBS`
 dict swapped for Postgres/SQLite without touching any route handler —
 each route only talks to `_start_job`, `_get_job`, and `_list_job_leads`.
 """
-import json
-import sqlite3
 from __future__ import annotations
 
 import csv
+import json
 import logging
+import os
+import sqlite3
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-import os
-from functools import wraps
-
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
