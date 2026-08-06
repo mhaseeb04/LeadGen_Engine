@@ -445,13 +445,22 @@ def states() -> Any:
 def create_campaign() -> Any:
     body = request.get_json(force=True, silent=True) or {}
 
-    state = body.get("state")
+        state = body.get("state")
     if not state or state not in US_STATES:
         return jsonify({"error": f"Invalid or missing 'state'. Choose from: {sorted(US_STATES)}"}), 400
 
+    city = (body.get("city") or "").strip() or None
+    # Commercial policy: city is required for speed and accurate Places results.
+    # State-wide searches are slow, costly, and often return poor coverage.
+    if not city:
+        return jsonify({
+            "error": "City is required for production campaigns. "
+                     "State-wide searches are too slow and unreliable."
+        }), 400
+
     params = {
         "state": state,
-        "city": (body.get("city") or "").strip() or None,
+        "city": city,
         "query": (body.get("query") or "").strip() or None,
         "category_ids": body.get("category_ids") or [],
         "dry_run": bool(body.get("dry_run", True)),
