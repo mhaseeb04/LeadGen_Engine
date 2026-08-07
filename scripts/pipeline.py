@@ -123,7 +123,7 @@ def run_pipeline(
         pass
 
     scrape_csv: Path = DATA_DIR / f"{state.lower().replace(' ', '_')}_leads.csv"
-        try:
+    try:
         scrape_csv = scrape_leads(
             state=state,
             categories=categories,
@@ -142,23 +142,40 @@ def run_pipeline(
         summary["leads_scraped"] = len(df)
         summary["scrape_csv"] = str(scrape_csv)
         logger.info("Phase 1 complete — %d leads scraped.", len(df))
-    except RuntimeError:
-        # Places billing/denied — re-raise so the API marks the job as error
-        # with a clear message instead of a silent empty result.
-        raise
     except Exception:
         logger.exception("Phase 1 FAILED.")
         return summary
 
     if summary["leads_scraped"] == 0:
-        from config import GOOGLE_MAPS_API_KEY
-        maps_hint = (
-            " GOOGLE_MAPS_API_KEY is not set (or not loaded) — the engine fell back to "
-            "OpenStreetMap which often returns zero results for hotels/restaurants. "
-            "Add your Google Maps Platform Places API key to .env and restart api_server.py."
-            if not GOOGLE_MAPS_API_KEY
-            else " Google Places was used but returned no results for this query — try a broader category or nearby city."
-        )
+        from config import GOOGLE_MAPS_API_KEY, is_placeholder
+
+        # Read the scraper's sidecar diagnostics — it records the REAL
+        # reason (e.g. Google's own "Places API (New) is not enabled"
+        # message) instead of forcing us to guess here.
+        google_error: str | None = None
+        try:
+            import json as _json
+            meta_path = Path(str(scrape_csv)).with_suffix(".meta.json")
+            if meta_path.exists():
+                google_error = (_json.loads(meta_path.read_text(encoding="utf-8")) or {}).get("google_error")
+        except Exception:  # noqa: BLE001 — diagnostics must never crash the pipeline
+            pass
+
+        if google_error:
+            maps_hint = f" Google Places FAILED with a configuration error → {google_error}"
+        elif not GOOGLE_MAPS_API_KEY or is_placeholder(GOOGLE_MAPS_API_KEY):
+            maps_hint = (
+                " GOOGLE_MAPS_API_KEY is missing or a placeholder. The engine fell back to "
+                "OpenStreetMap which has sparse coverage for many niches. "
+                "Add a real Google Maps API key to .env for production-grade results."
+            )
+        else:
+            maps_hint = (
+                " Google Places was used but returned no results. This can happen if the "
+                "API key has no billing enabled, is restricted, or the category is too narrow. "
+                "Check your Google Cloud Console or try a broader category."
+            )
+            
         empty_msg = (
             f"No businesses found for {', '.join(category_ids) if category_ids else 'the selected categories'} "
             f"in {city + ', ' if city else ''}{state}.{maps_hint}"
