@@ -48,26 +48,30 @@ swapped for a real queue (Celery/RQ + Redis) and the in-memory `JOBS`
 dict swapped for Postgres/SQLite without touching any route handler —
 each route only talks to `_start_job`, `_get_job`, and `_list_job_leads`.
 """
+
 from __future__ import annotations
 
 import csv
-import json
 import logging
-import os
-import sqlite3
 import threading
 import time
 import uuid
 from datetime import datetime, timezone
-from functools import wraps
 from pathlib import Path
 from typing import Any
 
 import pandas as pd
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, abort
 from flask_cors import CORS
+import os
 
 from config import CATEGORY_CATALOG, DATA_DIR, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, NOTIFY_EMAIL, SENDER_NAME, US_STATES
+from db import init_db, save_job, update_job, add_log, get_job
+
+# Initialize database on startup
+init_db()
+
+API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(levelname)-8s  %(message)s")
 logger = logging.getLogger(__name__)
@@ -76,184 +80,34 @@ app = Flask(__name__)
 CORS(app)  # dashboard/demo-site are served from different origins during local dev
 
 # ---------------------------------------------------------------------------
-# API authentication (commercial-grade gate)
-# Set API_SECRET in Render Environment Variables.
-# Dashboard must send header:  X-API-Key: <same secret>
-# If API_SECRET is empty, auth is disabled (local dev only).
+# Authentication Middleware
 # ---------------------------------------------------------------------------
-API_SECRET: str = os.environ.get("API_SECRET", "").strip()
-
-
-def require_api_key(fn):
-    """Protect write/sensitive endpoints. Public GETs (states, categories, health) stay open."""
-    @wraps(fn)
-    def wrapper(*args, **kwargs):
-        if not API_SECRET:
-            # Dev mode: no secret configured — allow (log once would be noisy)
-            return fn(*args, **kwargs)
-        key = (
-            request.headers.get("X-API-Key")
-            or request.headers.get("x-api-key")
-            or ""
-        ).strip()
-        if key != API_SECRET:
-            return jsonify({"error": "Unauthorized — invalid or missing X-API-Key"}), 401
-        return fn(*args, **kwargs)
-    return wrapper
-
+@app.before_request
+def check_auth():
+    # Public endpoints
+    if request.path in ["/api/health", "/api/categories", "/api/states", "/api/track", "/api/contact"]:
+        return
+    
+    # If no secret key is set in environment, allow all (local mode)
+    if not API_SECRET_KEY:
+        return
+        
+    auth_key = request.headers.get("X-API-Key")
+    if auth_key != API_SECRET_KEY:
+        abort(401, description="Invalid or missing API Key")
 
 # ---------------------------------------------------------------------------
-# SQLite job store (survives Render restarts)
-# ---------------------------------------------------------------------------
-JOBS_LOCK = threading.Lock()
-DB_PATH = Path(os.environ.get("JOBS_DB_PATH", str(DATA_DIR / "jobs.db")))
-
-
-def _db() -> sqlite3.Connection:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH), check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-
-def _init_db() -> None:
-    with _db() as conn:
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                id TEXT PRIMARY KEY,
-                params_json TEXT NOT NULL,
-                status TEXT NOT NULL,
-                phase TEXT,
-                message TEXT,
-                log_json TEXT,
-                summary_json TEXT,
-                error TEXT,
-                created_at TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at)"
-        )
-
-
-_init_db()
-
-
-def _row_to_job(row: sqlite3.Row) -> dict[str, Any]:
-    return {
-        "id": row["id"],
-        "params": json.loads(row["params_json"] or "{}"),
-        "status": row["status"],
-        "phase": row["phase"] or "queued",
-        "message": row["message"] or "",
-        "log": json.loads(row["log_json"] or "[]"),
-        "summary": json.loads(row["summary_json"]) if row["summary_json"] else None,
-        "error": row["error"],
-    }
-
-# ---------------------------------------------------------------------------
-# Hot-lead alert debounce. A visitor scrolling/re-rendering the demo page
-# can fire several "page_view" beacons in quick succession — this keeps
-# Haseeb from getting spammed with duplicate emails for the same visit.
-# Keyed by (business name, city); swap for Redis if running multiple
-# api_server.py processes behind a load balancer.
+# Hot-lead alert debounce.
 # ---------------------------------------------------------------------------
 _LAST_ALERTED: dict[tuple[str, str], float] = {}
 _ALERT_LOCK = threading.Lock()
 ALERT_DEBOUNCE_SECONDS = 30 * 60  # one alert per lead per 30 minutes
 
 
-def _new_job(params: dict[str, Any]) -> str:
-    job_id = uuid.uuid4().hex[:12]
-    now = datetime.now(timezone.utc).isoformat()
-    with JOBS_LOCK:
-        with _db() as conn:
-            conn.execute(
-                """
-                INSERT INTO jobs (id, params_json, status, phase, message, log_json, summary_json, error, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)
-                """,
-                (
-                    job_id,
-                    json.dumps(params),
-                    "queued",
-                    "queued",
-                    "Waiting to start…",
-                    "[]",
-                    now,
-                    now,
-                ),
-            )
-    return job_id
-
-
-def _update_job(job_id: str, **fields: Any) -> None:
-    allowed = {"status", "phase", "message", "summary", "error", "log"}
-    cols = []
-    vals: list[Any] = []
-    for k, v in fields.items():
-        if k not in allowed:
-            continue
-        if k == "summary":
-            cols.append("summary_json = ?")
-            vals.append(json.dumps(v) if v is not None else None)
-        elif k == "log":
-            cols.append("log_json = ?")
-            vals.append(json.dumps(v))
-        else:
-            cols.append(f"{k} = ?")
-            vals.append(v)
-    if not cols:
-        return
-    cols.append("updated_at = ?")
-    vals.append(datetime.now(timezone.utc).isoformat())
-    vals.append(job_id)
-    with JOBS_LOCK:
-        with _db() as conn:
-            conn.execute(
-                f"UPDATE jobs SET {', '.join(cols)} WHERE id = ?",
-                vals,
-            )
-
-
-def _append_log(job_id: str, phase: str, message: str) -> None:
-    with JOBS_LOCK:
-        with _db() as conn:
-            row = conn.execute(
-                "SELECT log_json FROM jobs WHERE id = ?", (job_id,)
-            ).fetchone()
-            if not row:
-                return
-            log = json.loads(row["log_json"] or "[]")
-            log.append({"phase": phase, "message": message})
-            conn.execute(
-                """
-                UPDATE jobs
-                SET phase = ?, message = ?, log_json = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    phase,
-                    message,
-                    json.dumps(log),
-                    datetime.now(timezone.utc).isoformat(),
-                    job_id,
-                ),
-            )
-
-
 def _run_job(job_id: str, params: dict[str, Any]) -> None:
-    # Imported lazily so `python api_server.py --help`-style introspection
-    # doesn't require Gemini/SMTP env vars to be present.
     from pipeline import run_pipeline
 
-    _update_job(job_id, status="running")
+    update_job(job_id, status="running")
     try:
         summary = run_pipeline(
             state=params["state"],
@@ -261,16 +115,17 @@ def _run_job(job_id: str, params: dict[str, Any]) -> None:
             city=params.get("city") or None,
             query_text=params.get("query") or None,
             dry_run=params.get("dry_run", False),
-            progress_cb=lambda phase, msg: _append_log(job_id, phase, msg),
+            progress_cb=lambda phase, msg: add_log(job_id, phase, msg),
         )
-        _update_job(job_id, status="done", summary=summary)
+        update_job(job_id, status="done", summary=summary)
     except Exception as exc:  # noqa: BLE001
         logger.exception("Job %s failed", job_id)
-        _update_job(job_id, status="error", error=str(exc))
+        update_job(job_id, status="error", error=str(exc))
 
 
 def _start_job(params: dict[str, Any]) -> str:
-    job_id = _new_job(params)
+    job_id = uuid.uuid4().hex[:12]
+    save_job(job_id, params)
     thread = threading.Thread(target=_run_job, args=(job_id, params), daemon=True)
     thread.start()
     return job_id
@@ -280,7 +135,6 @@ def _start_job(params: dict[str, Any]) -> str:
 # Routes
 # ---------------------------------------------------------------------------
 @app.post("/api/contact")
-@require_api_key
 def contact() -> Any:
     """Receive an inbound lead from the agency-site contact form and
     append it to ``data/inbound_contacts.csv``. Kept intentionally simple
@@ -441,26 +295,16 @@ def states() -> Any:
 
 
 @app.post("/api/campaigns")
-@require_api_key
 def create_campaign() -> Any:
     body = request.get_json(force=True, silent=True) or {}
 
-        state = body.get("state")
+    state = body.get("state")
     if not state or state not in US_STATES:
         return jsonify({"error": f"Invalid or missing 'state'. Choose from: {sorted(US_STATES)}"}), 400
 
-    city = (body.get("city") or "").strip() or None
-    # Commercial policy: city is required for speed and accurate Places results.
-    # State-wide searches are slow, costly, and often return poor coverage.
-    if not city:
-        return jsonify({
-            "error": "City is required for production campaigns. "
-                     "State-wide searches are too slow and unreliable."
-        }), 400
-
     params = {
         "state": state,
-        "city": city,
+        "city": (body.get("city") or "").strip() or None,
         "query": (body.get("query") or "").strip() or None,
         "category_ids": body.get("category_ids") or [],
         "dry_run": bool(body.get("dry_run", True)),
@@ -471,10 +315,7 @@ def create_campaign() -> Any:
 
 @app.get("/api/campaigns/<job_id>")
 def get_campaign(job_id: str) -> Any:
-    with JOBS_LOCK:
-        with _db() as conn:
-            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        job = _row_to_job(row) if row else None
+    job = get_job(job_id)
     if not job:
         return jsonify({"error": "Unknown job_id"}), 404
     return jsonify(job)
@@ -482,15 +323,13 @@ def get_campaign(job_id: str) -> Any:
 
 @app.get("/api/campaigns/<job_id>/leads")
 def get_campaign_leads(job_id: str) -> Any:
-    with JOBS_LOCK:
-        with _db() as conn:
-            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        job = _row_to_job(row) if row else None
+    job = get_job(job_id)
     if not job:
         return jsonify({"error": "Unknown job_id"}), 404
     if job["status"] != "done" or not job.get("summary"):
         return jsonify({"error": "Job not finished yet", "status": job["status"]}), 409
 
+    # Prefer the richest CSV available (with emails > enriched > raw scrape)
     csv_path = (
         job["summary"].get("email_csv")
         or job["summary"].get("enriched_csv")
@@ -504,12 +343,8 @@ def get_campaign_leads(job_id: str) -> Any:
 
 
 @app.post("/api/campaigns/<job_id>/send_emails")
-@require_api_key
 def send_campaign_emails(job_id: str) -> Any:
-    with JOBS_LOCK:
-        with _db() as conn:
-            row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
-        job = _row_to_job(row) if row else None
+    job = get_job(job_id)
     if not job:
         return jsonify({"error": "Unknown job_id"}), 404
     if job["status"] != "done" or not job.get("summary"):
@@ -519,6 +354,11 @@ def send_campaign_emails(job_id: str) -> Any:
     if not email_csv_path or not Path(email_csv_path).exists():
         return jsonify({"error": "No emails generated for this job"}), 404
 
+    # Restrict sending to exactly the leads the operator approved in
+    # Triage — matched by email address. Previously this field was sent
+    # by the dashboard but never read here, so "Send Approved Emails"
+    # actually sent to every eligible lead in the whole campaign,
+    # regardless of what was approved.
     body = request.get_json(force=True, silent=True) or {}
     approved_leads = body.get("leads") or []
     approved_emails = {
@@ -562,13 +402,13 @@ def send_campaign_emails(job_id: str) -> Any:
                 app_password=app_password,
                 sender_name=sender_name,
             )
-            _update_job(job_id, emails_sent=sent_count, send_status="completed")
+            update_job(job_id, emails_sent=sent_count, send_status="completed")
             logger.info("Job %s: Successfully sent %d emails.", job_id, sent_count)
         except Exception as exc:
-            _update_job(job_id, send_status="failed", send_error=str(exc))
+            update_job(job_id, send_status="failed", send_error=str(exc))
             logger.exception("Job %s: Email sending failed.", job_id)
 
-    _update_job(job_id, send_status="sending", emails_sent=0)
+    update_job(job_id, send_status="sending", emails_sent=0)
     threading.Thread(
         target=_send_job_emails,
         args=(job_id, send_csv_path, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, SENDER_NAME),
