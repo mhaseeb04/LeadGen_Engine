@@ -51,26 +51,60 @@ MAX_RETRIES: int = 2
 RETRY_BACKOFF: float = 6.0   # seconds
 REQUEST_DELAY: float = 2.0   # polite delay between Overpass calls
 
-# Google Places (legacy Text Search) — fast, accurate, enterprise-grade
+# Google Places (legacy Text Search) — kept ONLY as a fallback for old
+# Cloud projects that still have the legacy API enabled. New Google Cloud
+# projects (created after ~March 2025) CANNOT enable the legacy Places
+# API at all — their keys get REQUEST_DENIED on this endpoint, which is
+# exactly the "Google Places was used but returned no results" failure.
 PLACES_TEXTSEARCH_URL = "https://maps.googleapis.com/maps/api/place/textsearch/json"
 PLACES_DETAILS_URL = "https://maps.googleapis.com/maps/api/place/details/json"
 PLACES_MAX_PAGES = 3          # 20 results per page → up to 60 leads per query
-PLACES_PAGE_DELAY = 2.1       # Google requires ~2s before using next_page_token
+PLACES_PAGE_DELAY = 2.1       # legacy API requires ~2s before using next_page_token
 
-# One strong term per category (faster). Add more only when needed.
+# Google Places API (New) — the PRIMARY discovery endpoint. One POST
+# returns name, phone, website, address, geo, and status for 20 places at
+# once via the field mask, so no per-place Details round-trips are needed
+# (the legacy path burned up to 60 extra HTTP calls per campaign on
+# Details lookups — this alone is the single biggest speed win).
+PLACES_NEW_TEXTSEARCH_URL = "https://places.googleapis.com/v1/places:searchText"
+PLACES_NEW_FIELD_MASK = ",".join([
+    "places.id",
+    "places.displayName",
+    "places.formattedAddress",
+    "places.nationalPhoneNumber",
+    "places.internationalPhoneNumber",
+    "places.websiteUri",
+    "places.location",
+    "places.businessStatus",
+    "places.types",
+    "nextPageToken",
+])
+
+
+class DiscoveryAuthError(RuntimeError):
+    """Google rejected the API key / project configuration.
+
+    Raised so the *actual* Google error message ("API not enabled",
+    "billing disabled", "key restricted", …) reaches the operator's
+    dashboard instead of being swallowed into a generic
+    "returned no results — try a broader category" message that sends
+    them debugging the wrong thing.
+    """
+
+# Human-readable search terms for each category_id (used by Google Places)
 CATEGORY_SEARCH_TERMS: dict[str, list[str]] = {
-    "real_estate": ["real estate agency"],
-    "restaurants_cafes": ["restaurant"],
-    "bars_nightlife": ["bar"],
-    "beauty_salons": ["beauty salon"],
-    "health_medical": ["medical clinic"],
-    "veterinary": ["veterinary clinic"],
-    "automotive": ["auto repair"],
-    "legal_professional": ["lawyer"],
-    "retail_shopping": ["clothing store"],
-    "fitness_wellness": ["gym"],
-    "construction_trades": ["general contractor"],
-    "hospitality": ["hotel"],
+    "real_estate": ["real estate agency", "realtor", "estate agent"],
+    "restaurants_cafes": ["restaurant", "cafe", "coffee shop"],
+    "bars_nightlife": ["bar", "pub", "nightclub"],
+    "beauty_salons": ["beauty salon", "hair salon", "barber"],
+    "health_medical": ["dentist", "medical clinic", "doctor", "pharmacy"],
+    "veterinary": ["veterinary clinic", "animal hospital", "vet"],
+    "automotive": ["auto repair", "car dealership", "tire shop"],
+    "legal_professional": ["lawyer", "attorney", "accountant", "insurance agency"],
+    "retail_shopping": ["bakery", "florist", "clothing store"],
+    "fitness_wellness": ["gym", "fitness center", "yoga studio", "massage"],
+    "construction_trades": ["general contractor", "construction company", "hardware store"],
+    "hospitality": ["hotel", "motel", "guest house", "inn"],
 }
 
 
@@ -101,28 +135,149 @@ def _places_search_terms(category_ids: list[str] | None, query_text: str | None)
     return unique
 
 
-class PlacesAPIError(Exception):
-    """Raised when Google Places returns a hard failure (billing, denied, quota)."""
-    def __init__(self, status: str, message: str):
-        self.status = status
-        self.message = message
-        super().__init__(f"{status}: {message}")
+def _places_new_text_search(
+    query: str,
+    api_key: str,
+    max_pages: int = PLACES_MAX_PAGES,
+) -> list[dict[str, Any]]:
+    """Run Places API (New) Text Search with pagination.
+
+    Returns raw v1 ``place`` dicts. Raises :class:`DiscoveryAuthError` on
+    401/403 so the caller can fall back to the legacy endpoint (old
+    projects) and surface the real reason to the operator.
+    """
+    results: list[dict[str, Any]] = []
+    page_token: str | None = None
+
+    for _page in range(max_pages):
+        payload: dict[str, Any] = {"textQuery": query, "maxResultCount": 20}
+        if page_token:
+            payload["pageToken"] = page_token
+
+        try:
+            resp = requests.post(
+                PLACES_NEW_TEXTSEARCH_URL,
+                json=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "X-Goog-Api-Key": api_key,
+                    "X-Goog-FieldMask": PLACES_NEW_FIELD_MASK,
+                },
+                timeout=20,
+            )
+        except requests.RequestException as exc:
+            logger.error("Places (New) Text Search network error for %r: %s", query, exc)
+            break
+
+        if resp.status_code in (401, 403):
+            try:
+                err_msg = (resp.json().get("error") or {}).get("message") or resp.text[:300]
+            except ValueError:
+                err_msg = resp.text[:300]
+            raise DiscoveryAuthError(
+                f"Google Places API (New) rejected the request: {err_msg} "
+                f"(HTTP {resp.status_code}). In Google Cloud Console enable "
+                f"'Places API (New)' for this project, confirm billing is active, "
+                f"and check the key's API restrictions."
+            )
+
+        if not resp.ok:
+            logger.warning(
+                "Places (New) HTTP %d for %r: %.200s", resp.status_code, query, resp.text
+            )
+            break
+
+        data = resp.json()
+        page_places = data.get("places", [])
+        results.extend(page_places)
+        logger.info(
+            "Places (New) page for %r → %d results (running total %d)",
+            query, len(page_places), len(results),
+        )
+
+        page_token = data.get("nextPageToken")
+        if not page_token or not page_places:
+            break
+
+    return results
+
+
+def _record_from_new_place(
+    place: dict[str, Any],
+    state: str,
+    city: str | None,
+    category_label: str,
+) -> dict[str, Any] | None:
+    """Normalise a Places API (New) place into the pipeline's record shape.
+
+    Returns ``None`` for unusable leads (no name, closed, or no contact
+    path at all) so the caller can just filter.
+    """
+    name = ((place.get("displayName") or {}).get("text") or "").strip()
+    if not name:
+        return None
+
+    status = (place.get("businessStatus") or "OPERATIONAL").upper()
+    if status not in ("OPERATIONAL", "OPEN", "BUSINESS_STATUS_UNSPECIFIED"):
+        return None
+
+    website = (place.get("websiteUri") or "").strip()
+    phone = (
+        place.get("nationalPhoneNumber")
+        or place.get("internationalPhoneNumber")
+        or ""
+    ).strip()
+    if not phone and not website:
+        return None  # dead lead — no way to contact
+
+    address = (place.get("formattedAddress") or "").strip()
+    location = place.get("location") or {}
+    lat = location.get("latitude")
+    lon = location.get("longitude")
+
+    city_guess = city or ""
+    if not city_guess and address:
+        parts = [p.strip() for p in address.split(",")]
+        if len(parts) >= 3:
+            city_guess = parts[-3] if len(parts) >= 4 else parts[-2]
+
+    return {
+        "osm_id": "",
+        "osm_type": "google_places",
+        "place_id": place.get("id") or "",
+        "name": name,
+        "phone": phone,
+        "email": "",  # Google never returns email
+        "website": website,
+        "street": address,
+        "city": city_guess or "City Not Listed",
+        "state": state,
+        "postcode": "",
+        "category": category_label,
+        "lat": lat,
+        "lon": lon,
+    }
 
 
 def _places_text_search(
     query: str,
     api_key: str,
     max_pages: int = PLACES_MAX_PAGES,
+    new_api_error: "DiscoveryAuthError | None" = None,
 ) -> list[dict[str, Any]]:
-    """Run Google Places Text Search with pagination.
+    """Run legacy Google Places Text Search with pagination.
 
-    Raises PlacesAPIError on REQUEST_DENIED / OVER_QUERY_LIMIT so the
-    pipeline can surface a clear message instead of silent zero results.
+    Args:
+        new_api_error: If the Places API (New) attempt already failed with
+            an auth error, pass it here — a REQUEST_DENIED on this legacy
+            endpoint then raises a combined :class:`DiscoveryAuthError`
+            so the operator sees BOTH reasons at once.
     """
     results: list[dict[str, Any]] = []
     params: dict[str, str] = {
         "query": query,
         "key": api_key,
+        "type": "",  # leave empty; query already carries the intent
     }
     page = 0
     next_token: str | None = None
@@ -141,23 +296,28 @@ def _places_text_search(
             break
 
         status = data.get("status", "")
-        error_msg = data.get("error_message", "") or ""
-
-        if status == "REQUEST_DENIED":
-            raise PlacesAPIError(
-                status,
-                error_msg or "Places API denied. Enable Billing + Places API on Google Cloud.",
-            )
-        if status == "OVER_QUERY_LIMIT":
-            raise PlacesAPIError(
-                status,
-                error_msg or "Places API quota exceeded. Wait or upgrade quota.",
-            )
         if status not in ("OK", "ZERO_RESULTS"):
+            err_message = data.get("error_message", "")
             logger.warning(
                 "Places Text Search status=%s for %r — %s",
-                status, query, error_msg,
+                status, query, err_message,
             )
+            if status == "REQUEST_DENIED":
+                # This is a key/project configuration problem, NOT an
+                # empty area. Surface it — previously this was swallowed
+                # and shown to the operator as "no results found".
+                parts = [f"Legacy Places Text Search: REQUEST_DENIED — {err_message or 'no detail from Google'}."]
+                if new_api_error is not None:
+                    parts.insert(0, str(new_api_error))
+                parts.append(
+                    "Fix: in Google Cloud Console → APIs & Services, enable "
+                    "'Places API (New)', attach an active billing account, and "
+                    "ensure the key's restrictions allow it."
+                )
+                raise DiscoveryAuthError(" ".join(parts))
+            if status == "OVER_QUERY_LIMIT":
+                break
+            # For other transient statuses continue / stop gracefully
             break
 
         page_results = data.get("results", [])
@@ -218,14 +378,60 @@ def scrape_google_places(
         location_part, terms_to_run,
     )
 
+    # Resolve the category display label once for all records.
+    resolved_label = "business"
+    if category_ids:
+        for cat in CATEGORY_CATALOG:
+            if cat["id"] in category_ids:
+                resolved_label = cat["label"]
+                break
+
     seen_place_ids: set[str] = set()
     records: list[dict[str, Any]] = []
 
+    # ------------------------------------------------------------------
+    # PRIMARY: Places API (New) — one POST returns contact info for 20
+    # places, no Details round-trips. If the project can't use it (401/
+    # 403), we fall through to the legacy endpoint below; if BOTH are
+    # rejected, the auth error is raised so the operator sees Google's
+    # real message on the dashboard instead of "no results".
+    # ------------------------------------------------------------------
+    new_api_error: DiscoveryAuthError | None = None
+    try:
+        for term in terms_to_run:
+            if len(records) >= max_results:
+                break
+            full_query = f"{term} in {location_part}"
+            for place in _places_new_text_search(full_query, api_key):
+                if len(records) >= max_results:
+                    break
+                pid = place.get("id") or ""
+                if not pid or pid in seen_place_ids:
+                    continue
+                seen_place_ids.add(pid)
+                record = _record_from_new_place(place, state, city, resolved_label)
+                if record:
+                    records.append(record)
+        logger.info(
+            "Places API (New) returned %d unique, contactable leads for %s.",
+            len(records), location_part,
+        )
+        return records
+    except DiscoveryAuthError as exc:
+        new_api_error = exc
+        logger.warning(
+            "Places API (New) unavailable for this project (%s) — "
+            "trying legacy Text Search endpoint.", exc,
+        )
+
+    # ------------------------------------------------------------------
+    # FALLBACK: legacy Text Search (old Cloud projects only)
+    # ------------------------------------------------------------------
     for term in terms_to_run:
         if len(records) >= max_results:
             break
         full_query = f"{term} in {location_part}"
-        raw_results = _places_text_search(full_query, api_key)
+        raw_results = _places_text_search(full_query, api_key, new_api_error=new_api_error)
 
         for item in raw_results:
             if len(records) >= max_results:
@@ -418,8 +624,10 @@ def build_overpass_query(
         radius_m = int(radius_km * 1000)
         lines.append("(")
         for cat in categories:
+            # Removed ["name"] filter from query to avoid mirror instability; 
+            # we filter for names in Python parse_elements instead.
             lines.append(
-                f'  nwr["{cat["key"]}"="{cat["value"]}"]["name"](around:{radius_m},{lat},{lon});'
+                f'  nwr["{cat["key"]}"="{cat["value"]}"](around:{radius_m},{lat},{lon});'
             )
         lines.append(");")
         lines.append("out center tags;")
@@ -439,7 +647,7 @@ def build_overpass_query(
     lines.append("(")
     for cat in categories:
         lines.append(
-            f'  nwr["{cat["key"]}"="{cat["value"]}"]["name"](area.searchArea);'
+            f'  nwr["{cat["key"]}"="{cat["value"]}"](area.searchArea);'
         )
     lines.append(");")
     lines.append("out center tags;")
@@ -762,7 +970,12 @@ def scrape_leads(
     # ------------------------------------------------------------------
     # PRIMARY: Google Places (enterprise path)
     # ------------------------------------------------------------------
-        if GOOGLE_MAPS_API_KEY:
+    from config import is_placeholder
+    
+    use_google = GOOGLE_MAPS_API_KEY and not is_placeholder(GOOGLE_MAPS_API_KEY)
+    
+    google_error: str | None = None
+    if use_google:
         logger.info("Using Google Places API for lead discovery (key present).")
         try:
             records = scrape_google_places(
@@ -773,20 +986,19 @@ def scrape_leads(
                 api_key=GOOGLE_MAPS_API_KEY,
                 max_results=60,
             )
-        except PlacesAPIError as exc:
-            # Billing / quota / denied — do NOT silently fall back to OSM.
-            # OSM would also return empty and hide the real problem.
-            logger.error("Google Places hard failure: %s", exc)
-            raise RuntimeError(
-                f"Google Places API error ({exc.status}): {exc.message}. "
-                "Enable Billing + Places API on Google Cloud, then retry."
-            ) from exc
+        except DiscoveryAuthError as exc:
+            # Key/project misconfiguration — remember the REAL reason so
+            # the dashboard can show it instead of "no results found".
+            google_error = str(exc)
+            logger.error("Google Places auth/config error: %s", google_error)
+            records = []
         except Exception:
             logger.exception("Google Places discovery failed — will try OSM fallback.")
+            google_error = "Google Places request failed unexpectedly (see server logs)."
             records = []
     else:
         logger.warning(
-            "GOOGLE_MAPS_API_KEY not set — falling back to OpenStreetMap/Overpass "
+            "GOOGLE_MAPS_API_KEY not set or placeholder — falling back to OpenStreetMap/Overpass "
             "(slower, incomplete coverage for many niches)."
         )
 
@@ -831,6 +1043,23 @@ def scrape_leads(
                     "Check spelling or use a larger nearby city.",
                     city,
                 )
+
+    # ------------------------------------------------------------------
+    # Sidecar diagnostics: persist WHY discovery behaved the way it did
+    # so pipeline.py can build an accurate operator-facing message.
+    # ------------------------------------------------------------------
+    import json as _json_meta
+    meta = {
+        "google_key_present": bool(use_google),
+        "google_error": google_error,
+        "records_found": len(records),
+        "source": "google_places" if (use_google and records and not google_error) else ("osm_fallback" if records else "none"),
+    }
+    meta_path = output_path.with_suffix(".meta.json")
+    try:
+        meta_path.write_text(_json_meta.dumps(meta, indent=2), encoding="utf-8")
+    except OSError:
+        logger.warning("Could not write discovery meta file %s", meta_path)
 
     if not records:
         logger.warning("No records found for %s. Saving empty CSV.", state)
