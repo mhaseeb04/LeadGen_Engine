@@ -396,16 +396,34 @@ function downloadFile(content, fileName, contentType) {
 
 function showToast(message, type = 'info') {
   const container = document.getElementById('toast-container');
+
+  // Dedupe: if an identical toast is already showing, don't stack another —
+  // just restart its dismiss timer. Prevents floods of the same message.
+  const existing = Array.from(container.querySelectorAll('.toast'))
+    .find(t => t.dataset.message === message);
+  if (existing) {
+    clearTimeout(Number(existing.dataset.timer));
+    const t = setTimeout(() => {
+      existing.style.opacity = '0';
+      existing.style.transform = 'translateX(100%)';
+      setTimeout(() => existing.remove(), 300);
+    }, 3000);
+    existing.dataset.timer = String(t);
+    return;
+  }
+
   const toast = document.createElement('div');
   toast.className = `toast toast-${type}`;
+  toast.dataset.message = message;
   toast.innerHTML = `
     <span style="font-size:1.2rem">${type === 'success' ? '✅' : type === 'error' ? '❌' : 'ℹ️'}</span>
     <span>${message}</span>
   `;
   container.appendChild(toast);
-  setTimeout(() => {
+  const timer = setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(100%)';
     setTimeout(() => toast.remove(), 300);
   }, 3000);
+  toast.dataset.timer = String(timer);
 }
