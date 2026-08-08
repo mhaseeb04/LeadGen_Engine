@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>LeadGen Command Center</title>
-  <link rel="stylesheet" href="css/dashboard.css?v=20260808c">
+  <link rel="stylesheet" href="css/dashboard.css?v=20260809a">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 </head>
 <body>
@@ -37,7 +37,10 @@
       <div class="campaign-form">
         <div class="form-group form-group-wide">
           <label class="form-label">Search query <span class="label-hint">(optional — narrows results by business name)</span></label>
-          <input type="text" class="form-input" id="campaign-query" placeholder="e.g. family-run, boutique, 24-hour…">
+          <div style="display:flex;gap:10px;align-items:center;">
+            <input type="text" class="form-input" id="campaign-query" placeholder="✨ Try: 'fetch real estate businesses in Miami' — AI fills the fields below" style="flex:1;">
+            <button class="btn btn-secondary" id="btn-ai-parse" onclick="aiParseQuery()" title="Let AI extract state, city, and categories from your text">✨ AI Fill</button>
+          </div>
         </div>
 
         <div class="form-group">
@@ -172,8 +175,8 @@
   <!-- Hidden file input for CSV import -->
   <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCSVImport(event)">
 
-  <script src="js/campaign.js?v=20260808c"></script>
-  <script src="js/app.js?v=20260808c"></script>
+  <script src="js/campaign.js?v=20260809a"></script>
+  <script src="js/app.js?v=20260809a"></script>
 
 </body>
 </html>
