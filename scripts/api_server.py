@@ -87,16 +87,47 @@ CORS(app)  # dashboard/demo-site are served from different origins during local 
 # ---------------------------------------------------------------------------
 # Authentication Middleware
 # ---------------------------------------------------------------------------
+PUBLIC_PATHS = ["/api/health", "/api/categories", "/api/states", "/api/track", "/api/contact"]
+
+# Per-IP limiters for the two OPEN endpoints (track/contact). These stay
+# unauthenticated because the demo site calls them from a prospect's
+# browser, so a rate limit is the only thing standing between them and
+# inbox/disk flooding. Generous enough for real visitor traffic, tight
+# enough to stop abuse. Health/categories/states are read-only + cheap,
+# so they're public but not rate-limited here.
+from ratelimit_http import RateLimiter as _HTTPRateLimiter
+_PUBLIC_LIMITER = _HTTPRateLimiter(
+    max_requests=int(os.getenv("PUBLIC_RATE_MAX", "20")),
+    window_seconds=int(os.getenv("PUBLIC_RATE_WINDOW", "60")),
+)
+
+
+def _client_ip() -> str:
+    """Best-effort client IP, honouring the proxy header Render sets."""
+    fwd = request.headers.get("X-Forwarded-For", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.remote_addr or "unknown"
+
+
 @app.before_request
 def check_auth():
-    # Public endpoints
-    if request.path in ["/api/health", "/api/categories", "/api/states", "/api/track", "/api/contact"]:
+    # Rate-limit the OPEN endpoints before doing anything else.
+    if request.path in ("/api/track", "/api/contact"):
+        if not _PUBLIC_LIMITER.allow(_client_ip()):
+            resp = jsonify({"error": "Too many requests. Please slow down."})
+            resp.status_code = 429
+            resp.headers["Retry-After"] = str(_PUBLIC_LIMITER.retry_after())
+            return resp
+
+    # Public endpoints (no API key required)
+    if request.path in PUBLIC_PATHS:
         return
-    
+
     # If no secret key is set in environment, allow all (local mode)
     if not API_SECRET_KEY:
         return
-        
+
     auth_key = request.headers.get("X-API-Key")
     if auth_key != API_SECRET_KEY:
         abort(401, description="Invalid or missing API Key")
@@ -319,11 +350,21 @@ def create_campaign() -> Any:
     if not state or state not in US_STATES:
         return jsonify({"error": f"Invalid or missing 'state'. Choose from: {sorted(US_STATES)}"}), 400
 
+    # Validate category ids up front so a bad selection fails fast with a
+    # clear 400, rather than surfacing later as a background job error.
+    category_ids = body.get("category_ids") or []
+    if category_ids:
+        from config import resolve_category_ids
+        try:
+            resolve_category_ids(category_ids)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+
     params = {
         "state": state,
         "city": (body.get("city") or "").strip() or None,
         "query": (body.get("query") or "").strip() or None,
-        "category_ids": body.get("category_ids") or [],
+        "category_ids": category_ids,
         "dry_run": bool(body.get("dry_run", True)),
         # Triage-first: dashboard runs scrape+enrich only, so the leads
         # table loads in ~1 min. Emails are generated on demand per lead
