@@ -1464,10 +1464,16 @@ body {
   justify-content: space-between;
   gap: var(--space-md);
   margin-top: var(--space-lg);
+  flex-wrap: wrap;            /* on narrow widths, actions drop below instead of off-screen */
 }
 
 .campaign-progress {
-  flex: 1;
+  flex: 1 1 240px;           /* grow, but may shrink so the actions stay visible */
+  min-width: 0;              /* allow the bar to shrink instead of overflowing */
+}
+
+.campaign-actions {
+  flex: 0 0 auto;            /* actions keep their natural size and never get pushed off */
 }
 
 .progress-bar {
