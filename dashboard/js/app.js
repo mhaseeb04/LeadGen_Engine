@@ -196,6 +196,14 @@ function openReviewPanel(idx) {
   document.getElementById('review-panel').classList.add('active');
 }
 
+function regenerateEmail() {
+  // Force a fresh generation for the currently-open lead, even if it
+  // already has a body (used to retry after a 429, or to get a new draft).
+  if (AppState.currentReviewIdx === null) return;
+  AppState.leads[AppState.currentReviewIdx].emailBody = '';
+  generateEmailForLead(AppState.currentReviewIdx);
+}
+
 async function generateEmailForLead(idx) {
   const lead = AppState.leads[idx];
   const jobId = AppState.currentJobId;
@@ -235,7 +243,13 @@ async function generateEmailForLead(idx) {
       subjectEl.value = lead.emailSubject;
     } else {
       const reason = data.error || `HTTP ${res.status}`;
-      bodyEl.value = '';
+      // Surface the reason IN the body (not just a fleeting toast) so it's
+      // obvious what happened and the operator can retry. A 429 here means
+      // the Gemini key/model is out of quota for the moment.
+      const hint = /429|quota|exhaust/i.test(reason)
+        ? 'Gemini is rate-limited or out of daily quota right now. Wait a moment and click Regenerate, or check GEMINI_MODEL is gemini-2.0-flash.'
+        : reason;
+      bodyEl.value = `⚠️ Couldn't generate this email.\n\n${hint}`;
       showToast(`Couldn't generate email: ${reason}`, 'error');
     }
   } catch (err) {
@@ -256,7 +270,9 @@ function closeReviewPanel() {
 
 function approveCurrentLead() {
   if (AppState.currentReviewIdx !== null) {
-    // Optionally save edits from the textarea back to the state
+    // Save operator edits to BOTH subject and body back to state so the
+    // send step uses exactly what was approved.
+    AppState.leads[AppState.currentReviewIdx].emailSubject = document.getElementById('review-subject').value;
     AppState.leads[AppState.currentReviewIdx].emailBody = document.getElementById('review-body').value;
     AppState.leads[AppState.currentReviewIdx].status = 'approved';
     
