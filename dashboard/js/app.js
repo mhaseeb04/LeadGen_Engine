@@ -321,11 +321,30 @@ function exportVerifiedCSV() {
   showToast(`Exported ${verified.length} verified leads for dispatch!`, 'success');
 }
 
+let _sendInFlight = false;
 async function sendApprovedEmails() {
+  // Prevent duplicate sends: if a send is already running, ignore extra
+  // clicks (this is what was stacking 6 identical error toasts).
+  if (_sendInFlight) return;
+
   const verified = AppState.leads.filter(l => l.status === 'approved');
 
   if (verified.length === 0) {
-    showToast('No leads have been approved yet to send emails.', 'error');
+    showToast('No leads approved yet. Open a lead → Review → Approve & Mark Ready first.', 'error');
+    return;
+  }
+
+  // Client-side pre-check so we give a precise, helpful message instead of
+  // a generic server rejection: which approved leads are missing an email
+  // address or a generated body?
+  const sendable = verified.filter(l => (l.email || '').trim() && (l.emailBody || '').trim());
+  if (sendable.length === 0) {
+    const missingBody = verified.filter(l => !(l.emailBody || '').trim()).length;
+    const missingEmail = verified.filter(l => !(l.email || '').trim()).length;
+    let why = 'Your approved leads can’t be sent yet: ';
+    if (missingBody) why += `${missingBody} have no generated email body (open Review to generate one). `;
+    if (missingEmail) why += `${missingEmail} have no email address on file.`;
+    showToast(why.trim(), 'error');
     return;
   }
 
@@ -335,7 +354,6 @@ async function sendApprovedEmails() {
     return;
   }
 
-  // Use same API base + key as campaign.js
   const base = (typeof API_BASE !== 'undefined' && API_BASE)
     ? API_BASE
     : (window.LEADGEN_API_BASE || 'https://leadgen-engine-ngxx.onrender.com');
@@ -343,12 +361,16 @@ async function sendApprovedEmails() {
     ? apiHeaders()
     : { 'Content-Type': 'application/json' };
 
+  _sendInFlight = true;
+  const sendBtn = document.querySelector('[onclick="sendApprovedEmails()"]');
+  if (sendBtn) { sendBtn.disabled = true; sendBtn.style.opacity = '0.6'; }
+
   try {
     const response = await fetch(`${base}/api/campaigns/${jobId}/send_emails`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        leads: verified.map(l => ({
+        leads: sendable.map(l => ({
           email: l.email,
           name: l.name,
           city: l.city,
@@ -362,13 +384,16 @@ async function sendApprovedEmails() {
     const result = await response.json().catch(() => ({}));
 
     if (response.ok) {
-      showToast(result.status || 'Send started', 'success');
+      showToast(result.status || `Sending ${sendable.length} approved email(s)…`, 'success');
     } else {
       showToast(`Error sending emails: ${result.error || response.status}`, 'error');
     }
   } catch (error) {
     console.error('Error sending emails:', error);
     showToast('Failed to connect to the server to send emails.', 'error');
+  } finally {
+    _sendInFlight = false;
+    if (sendBtn) { sendBtn.disabled = false; sendBtn.style.opacity = '1'; }
   }
 }
 
