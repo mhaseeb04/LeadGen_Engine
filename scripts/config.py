@@ -32,6 +32,26 @@ def safe_str(value: Any, default: str = "") -> str:
     text = str(value).strip()
     return default if text.lower() == "nan" else text
 
+
+def is_placeholder(value: str | None) -> bool:
+    """Return True if a config value is empty or an obvious template
+    placeholder (e.g. ``your_api_key_here``) rather than a real secret.
+
+    scraper.py and pipeline.py rely on this to decide whether the Google
+    Places key is genuinely configured — treating a copied-over template
+    value as "configured" would silently produce REQUEST_DENIED runs.
+    """
+    if not value:
+        return True
+    lowered = value.strip().lower()
+    if not lowered:
+        return True
+    placeholder_markers = (
+        "your_api", "your-api", "api_key_here", "replace-with",
+        "changeme", "change_me", "xxxx", "todo", "placeholder", "example",
+    )
+    return any(marker in lowered for marker in placeholder_markers)
+
 # ---------------------------------------------------------------------------
 # Load .env from the project root (one level above /scripts).
 # Also try scripts/.env so a key placed next to the scripts still works.
