@@ -207,7 +207,12 @@ OVERPASS_URL: str = OVERPASS_MIRRORS[0]  # kept for legacy direct references
 # Gemini (google-genai SDK)
 # ---------------------------------------------------------------------------
 GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-GEMINI_MODEL: str = "gemini-2.5-flash"
+# Default to gemini-2.0-flash for outreach copy: it has FAR higher free-tier
+# limits (≈15 RPM / 1500 RPD) than gemini-2.5-flash (≈10 RPM / 250 RPD), and
+# a 120-word cold email needs no reasoning budget. The old 2.5-flash default
+# is exactly what produced the 429 storm in Phase 3. Override via .env if you
+# have a paid tier and prefer 2.5.
+GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
 
 # ---------------------------------------------------------------------------
 # Performance tuning (Phase 1) — all overridable via .env so you can dial
@@ -233,6 +238,11 @@ def _bool_env(name: str, default: bool = False) -> bool:
 # single number paces BOTH enrichment and email generation via a shared
 # token-bucket limiter, so raising it here speeds up everything at once.
 GEMINI_RPM: int = _int_env("GEMINI_RPM", 15)
+
+# Thinking budget for email generation. 0 = off (fastest, cheapest, and
+# plenty for short cold-email copy). Only relevant on models that support
+# thinking (e.g. gemini-2.5-*).
+EMAIL_THINKING_BUDGET: int = _int_env("EMAIL_THINKING_BUDGET", 0)
 
 # Concurrency for the enrichment phase (mostly HTTP work — safe to run
 # several at once). Email generation uses its own worker count since it's
