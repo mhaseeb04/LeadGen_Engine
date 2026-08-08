@@ -239,6 +239,11 @@ def _bool_env(name: str, default: bool = False) -> bool:
 # token-bucket limiter, so raising it here speeds up everything at once.
 GEMINI_RPM: int = _int_env("GEMINI_RPM", 15)
 
+# Leads cache (Module 1.3). Cached discovery results are reused for
+# repeat/overlapping searches. TTL bounds how long an audit is trusted.
+LEADS_CACHE_ENABLED: bool = _bool_env("LEADS_CACHE_ENABLED", True)
+LEADS_CACHE_TTL_DAYS: int = _int_env("LEADS_CACHE_TTL_DAYS", 30)
+
 # Thinking budget for email generation. 0 = off (fastest, cheapest, and
 # plenty for short cold-email copy). Only relevant on models that support
 # thinking (e.g. gemini-2.5-*).
