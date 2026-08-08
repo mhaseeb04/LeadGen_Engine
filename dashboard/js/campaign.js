@@ -27,7 +27,27 @@ const CampaignState = {
 document.addEventListener('DOMContentLoaded', () => {
   loadStates();
   loadCategories();
+  refreshCacheBadge();
 });
+
+// Fetch cache stats and show a small badge (e.g. "⚡ 240 leads cached").
+// Non-fatal: if the endpoint is unavailable the badge simply stays empty.
+async function refreshCacheBadge() {
+  const el = document.getElementById('cache-badge');
+  if (!el) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cache/stats`, { headers: apiHeaders() });
+    if (!res.ok) { el.textContent = ''; return; }
+    const s = await res.json();
+    const fresh = (s && typeof s.rows_fresh === 'number') ? s.rows_fresh : 0;
+    el.textContent = fresh > 0 ? `⚡ ${fresh} leads cached` : '';
+    el.title = fresh > 0
+      ? `${fresh} fresh cached leads across ${s.distinct_businesses} businesses (TTL ${s.ttl_days} days)`
+      : '';
+  } catch {
+    el.textContent = '';
+  }
+}
 
 async function loadStates() {
   const select = document.getElementById('campaign-state');
@@ -102,6 +122,7 @@ async function runCampaign() {
         category_ids: Array.from(CampaignState.selectedCategories),
         dry_run: true,          // never auto-send; approval happens in Triage
         generate_emails: false, // triage-first: leads load fast, emails generated on demand per lead
+        force_refresh: !!(document.getElementById('force-refresh-toggle') || {}).checked, // bypass cache when ticked
       }),
     });
 
@@ -146,8 +167,15 @@ function pollCampaign(jobId) {
         if (job.summary && job.summary.leads_scraped === 0) {
           showToast(job.summary.warning || 'No leads found for this search — try a different city or category.', 'error');
         } else {
-          showToast('Campaign complete — leads loaded into Triage Queue.', 'success');
+          const fromCache = job.summary && job.summary.source === 'cache';
+          showToast(
+            fromCache
+              ? '⚡ Loaded instantly from cache — leads in Triage Queue.'
+              : 'Campaign complete — leads loaded into Triage Queue.',
+            'success'
+          );
         }
+        refreshCacheBadge();
       } else if (job.status === 'error') {
         clearInterval(CampaignState.pollTimer);
         showToast(`Campaign failed: ${job.error}`, 'error');
