@@ -270,16 +270,27 @@ function closeReviewPanel() {
 
 function approveCurrentLead() {
   if (AppState.currentReviewIdx !== null) {
+    const subject = document.getElementById('review-subject').value;
+    const body = document.getElementById('review-body').value;
+
+    // Guard: never approve a lead with an empty body. Otherwise it counts
+    // as "Verified & Ready" but the send step correctly rejects it, which
+    // is exactly the "No approved leads with a generated body" error.
+    if (!body || !body.trim() || body.trim().startsWith('⚠️')) {
+      showToast('This email has no body yet. Click 🔄 Regenerate Email to generate one, then approve.', 'error');
+      return;
+    }
+
     // Save operator edits to BOTH subject and body back to state so the
     // send step uses exactly what was approved.
-    AppState.leads[AppState.currentReviewIdx].emailSubject = document.getElementById('review-subject').value;
-    AppState.leads[AppState.currentReviewIdx].emailBody = document.getElementById('review-body').value;
+    AppState.leads[AppState.currentReviewIdx].emailSubject = subject;
+    AppState.leads[AppState.currentReviewIdx].emailBody = body;
     AppState.leads[AppState.currentReviewIdx].status = 'approved';
-    
+
     closeReviewPanel();
     updateStats();
     renderLeadsTable();
-    showToast('Lead marked as verified!', 'success');
+    showToast('Lead approved and marked ready to send.', 'success');
   }
 }
 
