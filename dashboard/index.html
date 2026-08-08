@@ -61,7 +61,14 @@
           <div class="progress-bar"><div class="progress-fill" id="campaign-progress-fill"></div></div>
           <div class="progress-message" id="campaign-progress-message">Starting…</div>
         </div>
-        <button class="btn btn-primary" id="btn-run-campaign" onclick="runCampaign()">⚡ Run Campaign</button>
+        <div class="campaign-actions" style="display:flex;align-items:center;gap:14px;">
+          <label class="cache-toggle" title="Ignore cached results and scrape this area fresh" style="display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-secondary,#9aa);cursor:pointer;">
+            <input type="checkbox" id="force-refresh-toggle" style="cursor:pointer;">
+            <span>🔄 Force fresh scrape</span>
+          </label>
+          <span id="cache-badge" class="cache-badge" style="font-size:0.8rem;color:var(--text-secondary,#9aa);"></span>
+          <button class="btn btn-primary" id="btn-run-campaign" onclick="runCampaign()">⚡ Run Campaign</button>
+        </div>
       </div>
     </div>
 
