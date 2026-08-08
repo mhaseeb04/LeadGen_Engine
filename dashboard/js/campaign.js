@@ -100,7 +100,8 @@ async function runCampaign() {
         city,
         query,
         category_ids: Array.from(CampaignState.selectedCategories),
-        dry_run: true, // dashboard-launched runs never auto-send; approval happens in Triage
+        dry_run: true,          // never auto-send; approval happens in Triage
+        generate_emails: false, // triage-first: leads load fast, emails generated on demand per lead
       }),
     });
 
@@ -126,7 +127,12 @@ function pollCampaign(jobId) {
   clearInterval(CampaignState.pollTimer);
   CampaignState.pollTimer = setInterval(async () => {
     try {
-      const res = await fetch(`${API_BASE}/api/campaigns/${jobId}`);
+      // apiHeaders() is required here: this endpoint is auth-protected,
+      // so polling without the X-API-Key gets a 401 the moment
+      // API_SECRET_KEY is set in production — the campaign would start
+      // fine (runCampaign sends headers) and then every poll would fail
+      // as a fake "Lost connection".
+      const res = await fetch(`${API_BASE}/api/campaigns/${jobId}`, { headers: apiHeaders() });
       const job = await res.json();
 
       progressMsg.textContent = job.message || job.phase;
@@ -156,7 +162,7 @@ function pollCampaign(jobId) {
 }
 
 async function loadCampaignLeads(jobId) {
-  const res = await fetch(`${API_BASE}/api/campaigns/${jobId}/leads`);
+  const res = await fetch(`${API_BASE}/api/campaigns/${jobId}/leads`, { headers: apiHeaders() });
   if (!res.ok) return;
   const rows = await res.json();
 
