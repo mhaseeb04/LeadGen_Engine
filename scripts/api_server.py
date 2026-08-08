@@ -361,10 +361,12 @@ def generate_campaign_email(job_id: str) -> Any:
     Body: a single lead object (name, city, strategy, primary_flaw,
     report_json, demo_url, …). Returns ``{subject, body}``.
     """
-    job = get_job(job_id)
-    if not job:
-        return jsonify({"error": "Unknown job_id"}), 404
-
+    # NOTE: we intentionally do NOT require the job row to exist here.
+    # On Render's free tier the SQLite job store is on ephemeral disk, so
+    # an instance restart between running a campaign and clicking Review
+    # would wipe it — and generation only needs the lead payload the
+    # dashboard sends, not the job. Requiring the job caused a 404 and a
+    # blank email body in exactly that (common) situation.
     lead = request.get_json(force=True, silent=True) or {}
     if not (lead.get("name") or "").strip():
         return jsonify({"error": "Lead 'name' is required"}), 400
