@@ -86,6 +86,82 @@ function toggleCategory(id) {
   }
 }
 
+// ═══════════════════════════════════════════════════
+// ✨ AI Query Parse — "Copilot-style" natural language input.
+// Types "fetch real estate businesses in Miami" -> fills State=Florida,
+// City=Miami, selects the Real Estate chip. The user SEES what was
+// understood and can correct anything before running.
+// ═══════════════════════════════════════════════════
+async function aiParseQuery() {
+  const queryEl = document.getElementById('campaign-query');
+  const q = queryEl.value.trim();
+  if (!q) {
+    showToast('Type what you want first — e.g. "fetch real estate businesses in Miami".', 'error');
+    return;
+  }
+
+  const btn = document.getElementById('btn-ai-parse');
+  const orig = btn.textContent;
+  btn.textContent = '✨ Parsing…'; btn.disabled = true;
+
+  try {
+    const res = await fetch(`${API_BASE}/api/parse_query`, {
+      method: 'POST', headers: apiHeaders(), body: JSON.stringify({ query: q }),
+    });
+    const p = await res.json();
+    if (!res.ok) throw new Error(p.error || `HTTP ${res.status}`);
+
+    let filled = [];
+    // State (select)
+    if (p.state) {
+      const sel = document.getElementById('campaign-state');
+      if ([...sel.options].some(o => o.value === p.state)) {
+        sel.value = p.state; filled.push(`State: ${p.state}`);
+      }
+    }
+    // City (text input)
+    if (p.city) {
+      document.getElementById('campaign-city').value = p.city;
+      filled.push(`City: ${p.city}`);
+    }
+    // Categories (chips) — clear current selection, select parsed ones.
+    if (p.category_ids && p.category_ids.length) {
+      CampaignState.selectedCategories.clear();
+      document.querySelectorAll('.category-chip.selected').forEach(c => c.classList.remove('selected'));
+      p.category_ids.forEach(id => {
+        const chip = document.querySelector(`.category-chip[data-id="${id}"]`);
+        if (chip) { chip.classList.add('selected'); CampaignState.selectedCategories.add(id); }
+      });
+      filled.push(`Categories: ${p.category_ids.join(', ')}`);
+    }
+
+    if (filled.length) {
+      // The free-text has been converted into structured fields, so clear
+      // it — otherwise it would ALSO be sent as a business-name filter and
+      // (a) wrongly narrow results, (b) bypass the leads cache.
+      queryEl.value = '';
+      const missing = (p.needs || []).length
+        ? ` Still needed: ${p.needs.join(' & ').replace('category_ids','category')}.`
+        : ' Review below, then Run Campaign.';
+      showToast(`✨ Understood — ${filled.join(' · ')}.${missing}`, 'success');
+    } else {
+      showToast('Couldn\'t extract campaign details from that. Try naming a business type and a city, e.g. "salons in Denver".', 'error');
+    }
+  } catch (err) {
+    showToast(`AI parse failed: ${err.message}`, 'error');
+  } finally {
+    btn.textContent = orig; btn.disabled = false;
+  }
+}
+
+// Pressing Enter in the query box triggers AI Fill (natural flow).
+document.addEventListener('DOMContentLoaded', () => {
+  const q = document.getElementById('campaign-query');
+  if (q) q.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); aiParseQuery(); }
+  });
+});
+
 async function runCampaign() {
   const state = document.getElementById('campaign-state').value;
   const city = document.getElementById('campaign-city').value.trim();
