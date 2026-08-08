@@ -173,8 +173,16 @@ function openReviewPanel(idx) {
   }
 
   document.getElementById('review-subject').value = lead.emailSubject || '';
-  document.getElementById('review-body').value = lead.emailBody || '';
-  
+  const bodyEl = document.getElementById('review-body');
+  bodyEl.value = lead.emailBody || '';
+
+  // Triage-first: emails aren't generated up front anymore. If this lead
+  // doesn't have one yet, generate it on demand now (one Gemini call for
+  // the lead the operator is actually looking at).
+  if (!lead.emailBody || !lead.emailBody.trim()) {
+    generateEmailForLead(idx);
+  }
+
   document.getElementById('review-demo-url').value = lead.demoUrl || '';
   const demoLink = document.getElementById('review-demo-link');
   if (lead.demoUrl) {
@@ -186,6 +194,58 @@ function openReviewPanel(idx) {
 
   document.getElementById('review-panel-overlay').classList.add('active');
   document.getElementById('review-panel').classList.add('active');
+}
+
+async function generateEmailForLead(idx) {
+  const lead = AppState.leads[idx];
+  const jobId = AppState.currentJobId;
+  const bodyEl = document.getElementById('review-body');
+  const subjectEl = document.getElementById('review-subject');
+
+  if (!jobId) {
+    bodyEl.value = 'Run a campaign from the New Campaign panel first.';
+    return;
+  }
+
+  const base = (typeof API_BASE !== 'undefined' && API_BASE)
+    ? API_BASE
+    : (window.LEADGEN_API_BASE || 'https://leadgen-engine-ngxx.onrender.com');
+  const headers = (typeof apiHeaders === 'function')
+    ? apiHeaders() : { 'Content-Type': 'application/json' };
+
+  bodyEl.value = '✍️ Generating a personalised email…';
+  bodyEl.disabled = true;
+
+  try {
+    const res = await fetch(`${base}/api/campaigns/${jobId}/generate_email`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(lead), // send the whole lead (name, city, strategy, primary_flaw, report_json, demo_url…)
+    });
+    const data = await res.json().catch(() => ({}));
+
+    // The operator may have moved on to another lead while this ran —
+    // only apply the result if this lead is still the open one.
+    if (AppState.currentReviewIdx !== idx) return;
+
+    if (res.ok && data.body) {
+      lead.emailBody = data.body;
+      lead.emailSubject = data.subject || lead.emailSubject || 'Quick question';
+      bodyEl.value = data.body;
+      subjectEl.value = lead.emailSubject;
+    } else {
+      const reason = data.error || `HTTP ${res.status}`;
+      bodyEl.value = '';
+      showToast(`Couldn't generate email: ${reason}`, 'error');
+    }
+  } catch (err) {
+    if (AppState.currentReviewIdx === idx) {
+      bodyEl.value = '';
+      showToast('Failed to reach the API to generate the email.', 'error');
+    }
+  } finally {
+    bodyEl.disabled = false;
+  }
 }
 
 function closeReviewPanel() {
@@ -272,7 +332,14 @@ async function sendApprovedEmails() {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        leads: verified.map(l => ({ email: l.email, name: l.name })),
+        leads: verified.map(l => ({
+          email: l.email,
+          name: l.name,
+          city: l.city,
+          email_body: l.emailBody,
+          email_subject: l.emailSubject,
+          demo_url: l.demoUrl,
+        })),
       }),
     });
 
