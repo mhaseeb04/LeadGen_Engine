@@ -135,12 +135,13 @@
 
       <div class="form-group">
         <label class="form-label">Subject</label>
-        <input type="text" class="form-input" id="review-subject" readonly>
+        <input type="text" class="form-input" id="review-subject">
       </div>
 
       <div class="form-group">
         <label class="form-label">Email Body</label>
-        <textarea class="form-textarea email-textarea" id="review-body" readonly></textarea>
+        <textarea class="form-textarea email-textarea" id="review-body"></textarea>
+        <button class="btn btn-secondary btn-sm" id="btn-regenerate" onclick="regenerateEmail()" style="margin-top:8px;">🔄 Regenerate Email</button>
       </div>
 
       <div class="form-group">
