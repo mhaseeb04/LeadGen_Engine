@@ -53,6 +53,8 @@ def run_pipeline(
     base_url: str | None = None,
     dry_run: bool = False,
     generate_emails: bool = True,
+    use_cache: bool = True,
+    force_refresh: bool = False,
     subject_template: str = "Quick question for {name}",
     progress_cb: "callable | None" = None,
 ) -> dict[str, object]:
@@ -124,25 +126,58 @@ def run_pipeline(
         pass
 
     scrape_csv: Path = DATA_DIR / f"{state.lower().replace(' ', '_')}_leads.csv"
+    import pandas as pd
     try:
-        scrape_csv = scrape_leads(
-            state=state,
-            categories=categories,
-            category_ids=category_ids,
-            city=city,
-            query_text=query_text,
-            output_path=scrape_csv,
-            base_url=base_url,
-        )
-        import pandas as pd
-        # Empty CSVs (zero leads) have no columns — treat as 0 rows, not a crash.
-        try:
-            df = pd.read_csv(scrape_csv)
-        except pd.errors.EmptyDataError:
-            df = pd.DataFrame()
+        from config import LEADS_CACHE_ENABLED
+        from leads_cache import init_cache, get_cached, put_cached
+    except ImportError:
+        LEADS_CACHE_ENABLED = False  # cache module absent → behave exactly as before
+
+    df = None
+    # A free-text business-name query narrows results in a way the cache
+    # (keyed by state/city/category) can't represent, so we bypass the
+    # cache for those and always scrape live.
+    cache_usable = (
+        LEADS_CACHE_ENABLED and use_cache and not force_refresh and not (query_text or "").strip()
+    )
+
+    try:
+        if cache_usable:
+            init_cache()
+            cached = get_cached(state, city, category_ids)
+            if cached is not None and not cached.empty:
+                # INSTANT PATH: serve from cache, skip the whole scrape+audit.
+                df = cached
+                df.to_csv(scrape_csv, index=False)
+                summary["source"] = "cache"
+                _progress("scrape", f"Loaded {len(df)} leads from cache (instant).")
+                logger.info("Phase 1 served from CACHE — %d leads, 0 scrape calls.", len(df))
+
+        if df is None:
+            # MISS or bypass → live scrape, then warm the cache write-through.
+            scrape_csv = scrape_leads(
+                state=state,
+                categories=categories,
+                category_ids=category_ids,
+                city=city,
+                query_text=query_text,
+                output_path=scrape_csv,
+                base_url=base_url,
+            )
+            try:
+                df = pd.read_csv(scrape_csv)
+            except pd.errors.EmptyDataError:
+                df = pd.DataFrame()
+            summary["source"] = "scrape"
+            if cache_usable and not df.empty:
+                try:
+                    put_cached(df, state, city, category_ids)
+                except Exception:
+                    logger.warning("Cache write-through failed (non-fatal).", exc_info=True)
+
         summary["leads_scraped"] = len(df)
         summary["scrape_csv"] = str(scrape_csv)
-        logger.info("Phase 1 complete — %d leads scraped.", len(df))
+        logger.info("Phase 1 complete — %d leads (%s).", len(df), summary.get("source"))
     except Exception:
         logger.exception("Phase 1 FAILED.")
         return summary
