@@ -184,9 +184,21 @@ def resolve_category_ids(category_ids: list[str] | None) -> list[dict[str, str]]
         return BUSINESS_CATEGORIES
     by_id = {cat["id"]: cat["tags"] for cat in CATEGORY_CATALOG}
     tags: list[dict[str, str]] = []
+    unknown: list[str] = []
     for cid in category_ids:
-        tags.extend(by_id.get(cid, []))
-    return tags or BUSINESS_CATEGORIES
+        if cid in by_id:
+            tags.extend(by_id[cid])
+        else:
+            unknown.append(cid)
+    if not tags:
+        # A selection was made but NONE of the ids were valid. Silently
+        # falling back to "scrape everything" here would run a huge,
+        # unintended query — surface it as an explicit error instead.
+        raise ValueError(
+            f"None of the requested categories are recognised: {unknown}. "
+            f"Valid ids: {sorted(by_id)}"
+        )
+    return tags
 
 
 # ---------------------------------------------------------------------------
