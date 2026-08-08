@@ -68,8 +68,13 @@ import os
 from config import CATEGORY_CATALOG, DATA_DIR, GMAIL_ADDRESS, GMAIL_APP_PASSWORD, NOTIFY_EMAIL, SENDER_NAME, US_STATES
 from db import init_db, save_job, update_job, add_log, get_job
 
-# Initialize database on startup
+# Initialize databases on startup
 init_db()
+try:
+    from leads_cache import init_cache
+    init_cache()
+except Exception:  # noqa: BLE001 — cache is an optimization, never fatal
+    logger.warning("Leads cache init skipped.", exc_info=True)
 
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")
 
@@ -116,6 +121,7 @@ def _run_job(job_id: str, params: dict[str, Any]) -> None:
             query_text=params.get("query") or None,
             dry_run=params.get("dry_run", True),
             generate_emails=params.get("generate_emails", False),
+            force_refresh=params.get("force_refresh", False),
             progress_cb=lambda phase, msg: add_log(job_id, phase, msg),
         )
         update_job(job_id, status="done", summary=summary)
@@ -283,6 +289,16 @@ def health() -> Any:
     return jsonify({"status": "ok"})
 
 
+@app.get("/api/cache/stats")
+def cache_stats_endpoint() -> Any:
+    """Small summary of the leads cache (for a dashboard badge)."""
+    try:
+        from leads_cache import cache_stats
+        return jsonify(cache_stats())
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 200
+
+
 @app.get("/api/categories")
 def categories() -> Any:
     return jsonify([
@@ -314,6 +330,9 @@ def create_campaign() -> Any:
         # via /generate_email. Set generate_emails=true to opt into the
         # old bulk-generate behaviour (CLI/power use).
         "generate_emails": bool(body.get("generate_emails", False)),
+        # When True, bypass the leads cache and force a fresh scrape+audit
+        # (use to refresh a stale area on demand).
+        "force_refresh": bool(body.get("force_refresh", False)),
     }
     job_id = _start_job(params)
     return jsonify({"job_id": job_id}), 202
