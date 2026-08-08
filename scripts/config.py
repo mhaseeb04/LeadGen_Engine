@@ -210,6 +210,44 @@ GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL: str = "gemini-2.5-flash"
 
 # ---------------------------------------------------------------------------
+# Performance tuning (Phase 1) — all overridable via .env so you can dial
+# these up on a paid Gemini tier without touching code.
+# ---------------------------------------------------------------------------
+def _int_env(name: str, default: int) -> int:
+    """Read an int from the environment, falling back safely on bad input."""
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
+def _bool_env(name: str, default: bool = False) -> bool:
+    """Read a boolean-ish env var ('1', 'true', 'yes', 'on')."""
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+# Gemini free tier is ~15 requests/minute; paid tiers are far higher. This
+# single number paces BOTH enrichment and email generation via a shared
+# token-bucket limiter, so raising it here speeds up everything at once.
+GEMINI_RPM: int = _int_env("GEMINI_RPM", 15)
+
+# Concurrency for the enrichment phase (mostly HTTP work — safe to run
+# several at once). Email generation uses its own worker count since it's
+# gated harder by the Gemini RPM limit.
+ENRICH_MAX_WORKERS: int = _int_env("ENRICH_MAX_WORKERS", 8)
+EMAIL_MAX_WORKERS: int = _int_env("EMAIL_MAX_WORKERS", 4)
+
+# Review-sentiment lookup (DuckDuckGo search + a Gemini summary per lead)
+# is the single biggest time sink in enrichment — and the result isn't
+# consumed anywhere downstream (not in emails, not on the dashboard). It's
+# therefore OFF by default. Flip ENABLE_REVIEW_SENTIMENT=1 in .env to
+# re-enable it if you later surface it in the UI.
+ENABLE_REVIEW_SENTIMENT: bool = _bool_env("ENABLE_REVIEW_SENTIMENT", False)
+
+# ---------------------------------------------------------------------------
 # Google Maps Platform (Places API) — primary lead discovery source
 # ---------------------------------------------------------------------------
 GOOGLE_MAPS_API_KEY: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
