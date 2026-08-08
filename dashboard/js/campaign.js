@@ -146,7 +146,12 @@ function pollCampaign(jobId) {
   const progressFill = document.getElementById('campaign-progress-fill');
 
   clearInterval(CampaignState.pollTimer);
+  CampaignState.pollFinished = false; // guards against overlapping async ticks
   CampaignState.pollTimer = setInterval(async () => {
+    // A tick may still be in flight (awaiting fetch/loadCampaignLeads) when
+    // the next fires. Without this guard, several ticks can each enter the
+    // 'done' branch and stack duplicate "Campaign complete" toasts.
+    if (CampaignState.pollFinished) return;
     try {
       // apiHeaders() is required here: this endpoint is auth-protected,
       // so polling without the X-API-Key gets a 401 the moment
@@ -156,10 +161,13 @@ function pollCampaign(jobId) {
       const res = await fetch(`${API_BASE}/api/campaigns/${jobId}`, { headers: apiHeaders() });
       const job = await res.json();
 
+      if (CampaignState.pollFinished) return; // finished while this fetch was in flight
+
       progressMsg.textContent = job.message || job.phase;
       progressFill.style.width = `${PHASE_PROGRESS[job.phase] || 10}%`;
 
       if (job.status === 'done') {
+        CampaignState.pollFinished = true;
         clearInterval(CampaignState.pollTimer);
         progressFill.style.width = '100%';
         await loadCampaignLeads(jobId);
@@ -177,11 +185,13 @@ function pollCampaign(jobId) {
         }
         refreshCacheBadge();
       } else if (job.status === 'error') {
+        CampaignState.pollFinished = true;
         clearInterval(CampaignState.pollTimer);
         showToast(`Campaign failed: ${job.error}`, 'error');
         resetCampaignButton();
       }
     } catch (err) {
+      CampaignState.pollFinished = true;
       clearInterval(CampaignState.pollTimer);
       showToast('Lost connection to the API server.', 'error');
       resetCampaignButton();
