@@ -52,6 +52,7 @@ def run_pipeline(
     query_text: str | None = None,
     base_url: str | None = None,
     dry_run: bool = False,
+    generate_emails: bool = True,
     subject_template: str = "Quick question for {name}",
     progress_cb: "callable | None" = None,
 ) -> dict[str, object]:
@@ -195,13 +196,16 @@ def run_pipeline(
     _progress("enrich", f"Enriching {summary['leads_scraped']} leads…")
 
     from enricher import batch_enrich
-    
+    from config import ENABLE_REVIEW_SENTIMENT
+
     enriched_csv: Path = scrape_csv.with_name(
         scrape_csv.stem + "_enriched.csv"
     )
 
     try:
-        validate_config(require_gemini=True)
+        # Enrichment only calls Gemini when review-sentiment is enabled;
+        # otherwise it's pure HTTP (email discovery) and needs no key.
+        validate_config(require_gemini=ENABLE_REVIEW_SENTIMENT)
         enriched_csv = batch_enrich(
             input_csv=scrape_csv,
             output_csv=enriched_csv,
@@ -217,6 +221,20 @@ def run_pipeline(
 
     if summary.get("leads_enriched", 0) == 0:
         logger.warning("No leads survived enrichment — pipeline stopping early.")
+        return summary
+
+    # ------------------------------------------------------------------
+    # Triage-first stop: when the caller only wants leads (the default
+    # for dashboard campaigns), we stop here. The job reaches "done" in
+    # ~1 minute so the leads table loads immediately, and emails are
+    # generated ON DEMAND per reviewed lead instead of all up front —
+    # which is what eliminates the Phase-3 429 storm that used to block
+    # the whole job (and the table) for many minutes.
+    # ------------------------------------------------------------------
+    if not generate_emails:
+        elapsed = time.time() - start_time
+        logger.info("Email generation skipped (triage-first mode). Leads ready in %.1fs.", elapsed)
+        _progress("done", f"{summary['leads_enriched']} leads ready for triage.")
         return summary
 
     # ------------------------------------------------------------------
