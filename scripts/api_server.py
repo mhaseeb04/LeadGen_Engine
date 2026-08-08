@@ -330,6 +330,28 @@ def cache_stats_endpoint() -> Any:
         return jsonify({"error": str(exc)}), 200
 
 
+@app.post("/api/parse_query")
+def parse_query_endpoint() -> Any:
+    """Copilot-style natural-language parsing for the campaign form.
+
+    Body: {"query": "scrape real estate businesses in Miami"}
+    Returns: {state, city, category_ids, confidence, source, needs}
+
+    Instant keyword layer first (free); Gemini only for complex phrasing.
+    All outputs validated against the real state/category vocabularies.
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    q = (body.get("query") or "").strip()
+    if len(q) > 300:
+        return jsonify({"error": "Query too long (300 chars max)"}), 400
+    from query_parser import parse_campaign_query
+    try:
+        return jsonify(parse_campaign_query(q)), 200
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("parse_query failed")
+        return jsonify({"error": f"Parse failed: {exc}"}), 500
+
+
 @app.get("/api/categories")
 def categories() -> Any:
     return jsonify([
