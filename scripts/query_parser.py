@@ -77,6 +77,20 @@ CATEGORY_SYNONYMS: dict[str, list[str]] = {
                              "landscaping", "builder", "remodeling"],
     "hospitality": ["hotel", "hotels", "motel", "inn", "hospitality", "resort",
                      "bed and breakfast", "b&b", "lodging"],
+    "financial_services": ["bank", "banks", "insurance", "insurance agency", "financial advisor",
+                            "tax advisor", "accountant", "accounting firm", "credit union"],
+    "pet_services": ["pet grooming", "dog grooming", "pet boarding", "kennel", "pet store", "pet sitting"],
+    "home_services": ["laundry", "dry cleaning", "dry cleaner", "cleaning service", "house cleaning",
+                       "maid service", "storage unit", "self storage"],
+    "events_photography": ["photographer", "photography", "photo studio", "event planner",
+                            "florist", "flower shop", "event venue"],
+    "education_childcare": ["daycare", "childcare", "preschool", "tutoring", "driving school",
+                             "education center", "learning center"],
+    "travel_transport": ["travel agency", "travel agent", "car rental", "taxi service", "limo service"],
+    "specialty_trades": ["locksmith", "car wash", "tattoo shop", "tattoo parlor"],
+    "funeral_services": ["funeral home", "funeral director", "mortuary", "cremation"],
+    "printing_signage": ["print shop", "printing", "sign maker", "signage", "copy shop"],
+    "entertainment": ["bowling alley", "arcade", "escape room", "entertainment venue"],
 }
 
 # --------------------------------------------------------------------------- #
@@ -139,6 +153,17 @@ CITY_TO_STATE: dict[str, str] = {
 
 _STATES_LOWER = {s.lower(): s for s in US_STATES}
 _VALID_CATEGORY_IDS = {c["id"] for c in CATEGORY_CATALOG}
+
+# Merge in the comprehensive city dataset (us_cities.py) so AI Fill
+# recognises far more cities than the hand-curated map alone. Curated
+# entries win on conflict (they're hand-verified for ambiguous names).
+try:
+    from us_cities import CITIES_BY_STATE
+    for _state, _cities in CITIES_BY_STATE.items():
+        for _city in _cities:
+            CITY_TO_STATE.setdefault(_city.lower(), _state)
+except ImportError:
+    pass
 
 
 # --------------------------------------------------------------------------- #
