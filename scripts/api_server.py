@@ -364,6 +364,23 @@ def states() -> Any:
     return jsonify(sorted(US_STATES.keys()))
 
 
+@app.get("/api/cities")
+def cities_endpoint() -> Any:
+    """Cities for a given state, to populate the city dropdown/datalist.
+
+    GET /api/cities?state=Florida -> ["Fort Lauderdale", "Miami", ...]
+
+    Empty list (not an error) if the state has no data — the UI treats an
+    empty city as a valid state-wide search either way, so this never
+    blocks a campaign; it only means fewer suggestions are offered.
+    """
+    state = (request.args.get("state") or "").strip()
+    if not state or state not in US_STATES:
+        return jsonify({"error": f"Unknown state '{state}'"}), 400
+    from us_cities import CITIES_BY_STATE
+    return jsonify(CITIES_BY_STATE.get(state, [])), 200
+
+
 @app.post("/api/campaigns")
 def create_campaign() -> Any:
     body = request.get_json(force=True, silent=True) or {}
