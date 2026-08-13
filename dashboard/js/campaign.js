@@ -22,13 +22,67 @@ function apiHeaders(extra) {
 const CampaignState = {
   selectedCategories: new Set(),
   pollTimer: null,
+  stateWideConfirmed: false,
 };
 
 document.addEventListener('DOMContentLoaded', () => {
   loadStates();
   loadCategories();
+  ensureAiControls();   // self-heal: build AI Fill + cache controls if the HTML predates them
   refreshCacheBadge();
 });
+
+// ═══════════════════════════════════════════════════
+// Self-sufficient UI: if the served index.html is an older version that
+// lacks the ✨ AI Fill button or the cache toggle/badge, CREATE them from
+// JS. This decouples features from HTML deployment — as long as this
+// campaign.js loads, the controls exist.
+// ═══════════════════════════════════════════════════
+function ensureAiControls() {
+  // --- ✨ AI Fill button next to the query input ---
+  const queryEl = document.getElementById('campaign-query');
+  if (queryEl && !document.getElementById('btn-ai-parse')) {
+    const wrap = document.createElement('div');
+    wrap.style.cssText = 'display:flex;gap:10px;align-items:center;';
+    queryEl.parentNode.insertBefore(wrap, queryEl);
+    queryEl.style.flex = '1';
+    queryEl.placeholder = "✨ Try: 'fetch real estate businesses in Miami' — AI fills the fields below";
+    wrap.appendChild(queryEl);
+    const btn = document.createElement('button');
+    btn.id = 'btn-ai-parse';
+    btn.className = 'btn btn-secondary';
+    btn.title = 'Let AI extract state, city, and categories from your text';
+    btn.textContent = '✨ AI Fill';
+    btn.onclick = aiParseQuery;
+    wrap.appendChild(btn);
+  }
+  // Enter in the query box triggers AI Fill (bind once).
+  if (queryEl && !queryEl.dataset.aiBound) {
+    queryEl.dataset.aiBound = '1';
+    queryEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); aiParseQuery(); }
+    });
+  }
+
+  // --- Force-fresh toggle + cache badge next to Run Campaign ---
+  const runBtn = document.getElementById('btn-run-campaign');
+  if (runBtn && !document.getElementById('force-refresh-toggle')) {
+    const actions = document.createElement('div');
+    actions.className = 'campaign-actions';
+    actions.style.cssText = 'display:flex;align-items:center;gap:14px;flex:0 0 auto;';
+    runBtn.parentNode.insertBefore(actions, runBtn);
+    const label = document.createElement('label');
+    label.title = 'Ignore cached results and scrape this area fresh';
+    label.style.cssText = 'display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-secondary,#9aa);cursor:pointer;';
+    label.innerHTML = '<input type="checkbox" id="force-refresh-toggle" style="cursor:pointer;"><span>🔄 Force fresh scrape</span>';
+    const badge = document.createElement('span');
+    badge.id = 'cache-badge';
+    badge.style.cssText = 'font-size:0.8rem;color:var(--text-secondary,#9aa);';
+    actions.appendChild(label);
+    actions.appendChild(badge);
+    actions.appendChild(runBtn);
+  }
+}
 
 // Fetch cache stats and show a small badge (e.g. "⚡ 240 leads cached").
 // Non-fatal: if the endpoint is unavailable the badge simply stays empty.
@@ -54,9 +108,35 @@ async function loadStates() {
   try {
     const res = await fetch(`${API_BASE}/api/states`);
     const states = await res.json();
-    select.innerHTML = states.map(s => `<option value="${s}">${s}</option>`).join('');
+    select.innerHTML = `<option value="">Select a state…</option>` +
+      states.map(s => `<option value="${s}">${s}</option>`).join('');
+    select.addEventListener('change', () => loadCitiesForState(select.value));
   } catch (err) {
     select.innerHTML = `<option value="">API offline — run api_server.py</option>`;
+  }
+}
+
+// Populate a <datalist> of cities for the chosen state so the operator can
+// pick from a real, comprehensive list — while the field STAYS a free-text
+// input (so unlisted towns can still be typed). Leaving it blank is always
+// valid: it just means a state-wide search.
+async function loadCitiesForState(state) {
+  const cityInput = document.getElementById('campaign-city');
+  let datalist = document.getElementById('city-datalist');
+  if (!datalist) {
+    datalist = document.createElement('datalist');
+    datalist.id = 'city-datalist';
+    cityInput.setAttribute('list', 'city-datalist');
+    cityInput.parentNode.appendChild(datalist);
+  }
+  cityInput.placeholder = 'Start typing, pick from the list, or leave blank for the whole state';
+  if (!state) { datalist.innerHTML = ''; return; }
+  try {
+    const res = await fetch(`${API_BASE}/api/cities?state=${encodeURIComponent(state)}`, { headers: apiHeaders() });
+    const cities = await res.json();
+    datalist.innerHTML = Array.isArray(cities) ? cities.map(c => `<option value="${c}">`).join('') : '';
+  } catch {
+    datalist.innerHTML = '';
   }
 }
 
@@ -117,6 +197,7 @@ async function aiParseQuery() {
       const sel = document.getElementById('campaign-state');
       if ([...sel.options].some(o => o.value === p.state)) {
         sel.value = p.state; filled.push(`State: ${p.state}`);
+        loadCitiesForState(p.state); // populate the city datalist for the parsed state
       }
     }
     // City (text input)
@@ -154,13 +235,7 @@ async function aiParseQuery() {
   }
 }
 
-// Pressing Enter in the query box triggers AI Fill (natural flow).
-document.addEventListener('DOMContentLoaded', () => {
-  const q = document.getElementById('campaign-query');
-  if (q) q.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') { e.preventDefault(); aiParseQuery(); }
-  });
-});
+// (Enter-to-parse is bound once inside ensureAiControls with a guard.)
 
 async function runCampaign() {
   const state = document.getElementById('campaign-state').value;
@@ -171,10 +246,16 @@ async function runCampaign() {
     showToast('Pick a state to scrape first.', 'error');
     return;
   }
-  if (!city) {
-    showToast('City is required for fast, accurate results.', 'error');
+  // City is OPTIONAL: no city = state-wide search. We no longer hard-block
+  // this — instead we ask for a quick confirmation (state-wide is slower
+  // and the city dropdown makes it easy to narrow down first).
+  if (!city && !CampaignState.stateWideConfirmed) {
+    showToast('No city selected — this will search the WHOLE state (slower). Click Run Campaign again to confirm, or pick a city above.', 'info');
+    CampaignState.stateWideConfirmed = true;
+    setTimeout(() => { CampaignState.stateWideConfirmed = false; }, 8000); // confirmation window
     return;
   }
+  CampaignState.stateWideConfirmed = false;
 
   const btn = document.getElementById('btn-run-campaign');
   btn.disabled = true;
