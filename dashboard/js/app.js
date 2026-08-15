@@ -107,23 +107,23 @@ function renderLeadsTable() {
   const tbody = document.getElementById('leads-tbody');
   
   if (AppState.leads.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:2rem;">Load pipeline data to begin triage.</td></tr>`;
+    tbody.innerHTML = `<tr class="empty-row"><td colspan="5"><div class="empty-state"><div class="empty-icon">⌁</div><strong>Your triage queue is ready</strong><span>Run a campaign or import pipeline data to start reviewing leads.</span></div></td></tr>`;
     return;
   }
 
   tbody.innerHTML = AppState.leads.map((lead, idx) => `
-    <tr style="opacity: ${lead.status === 'approved' ? '0.5' : '1'}">
-      <td style="font-weight: 500">${escapeHtml(lead.name || '—')}</td>
+    <tr class="lead-row ${lead.status === 'approved' ? 'is-approved' : ''}">
+      <td class="lead-business"><div class="lead-name">${escapeHtml(lead.name || '—')}</div><div class="lead-source">Prospect record</div></td>
       <td>
-        <div style="font-size:0.85rem">${escapeHtml(lead.phone || '—')}</div>
-        <div style="font-size:0.75rem;color:var(--text-tertiary)">${escapeHtml(lead.city || '—')}</div>
+        <div class="contact-primary">${escapeHtml(lead.phone || '—')}</div>
+        <div class="contact-secondary">${escapeHtml(lead.city || '—')}</div>
       </td>
       <td>${getStrategyBadge(lead.strategy)}</td>
       <td>
         <div class="audit-text">${escapeHtml(lead.primaryFlaw || 'None')}</div>
         <div style="display:flex;gap:8px;margin-top:2px">
-          ${lead.flawCount > 0 ? `<span style="font-size:0.7rem;color:var(--neon-cyan)">${lead.flawCount} flaws</span>` : ''}
-          ${lead.grade ? `<span style="font-size:0.7rem;color:var(--text-tertiary)">Grade ${escapeHtml(String(lead.grade))} (${escapeHtml(String(lead.score))})</span>` : ''}
+          ${lead.flawCount > 0 ? `<span class="flaw-count">${lead.flawCount} flaws</span>` : ''}
+          ${lead.grade ? `<span class="grade-copy">Grade ${escapeHtml(String(lead.grade))} (${escapeHtml(String(lead.score))})</span>` : ''}
         </div>
       </td>
       <td>

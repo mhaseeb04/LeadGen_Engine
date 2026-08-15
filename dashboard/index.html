@@ -3,180 +3,107 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>LeadGen Command Center</title>
-  <link rel="stylesheet" href="css/dashboard.css?v=20260809c">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+  <meta name="theme-color" content="#f6f8fb">
+  <meta name="description" content="LeadGen campaign discovery, triage, and outreach workspace">
+  <title>LeadGen OS · Campaign workspace</title>
+  <link rel="stylesheet" href="css/dashboard.css?v=20260815-light">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='24' fill='%230ea5c6'/><path d='M57 12 27 56h21l-5 32 30-45H52z' fill='white'/></svg>">
 </head>
 <body>
-
-  <!-- Background Effects -->
-  <div class="bg-grid"></div>
-
-  <div class="app-container">
-
-    <!-- HEADER -->
-    <header class="app-header">
-      <div class="logo">
-        <div class="logo-icon">⚡</div>
-        <div class="logo-text"><span>LeadGen</span> Command Center</div>
+  <div class="app-shell">
+    <aside class="sidebar" aria-label="Primary navigation">
+      <div class="brand-lockup">
+        <div class="brand-mark" aria-hidden="true"><span>✦</span></div>
+        <div><div class="brand-name">LeadGen</div><div class="brand-product">OPERATIONS OS</div></div>
       </div>
-      <div class="header-actions">
-        <button class="btn btn-secondary btn-sm" onclick="importCSV()">📁 Load Pipeline Data</button>
-        <button class="btn btn-primary btn-sm" onclick="exportVerifiedCSV()">📥 Export Verified for Dispatch</button>
-        <button class="btn btn-success btn-sm" onclick="sendApprovedEmails()">📧 Send Approved Emails</button>
+      <div class="workspace-switcher"><span class="workspace-dot"></span><span><strong>Growth workspace</strong><small>Agency pipeline</small></span><span class="workspace-chevron">⌄</span></div>
+      <nav class="nav-list">
+        <a class="nav-item active" href="#campaign"><span class="nav-icon">⌁</span><span>Campaigns</span><span class="nav-count">01</span></a>
+        <a class="nav-item" href="#queue"><span class="nav-icon">☷</span><span>Triage queue</span></a>
+        <a class="nav-item" href="#insights"><span class="nav-icon">◒</span><span>Insights</span></a>
+        <a class="nav-item" href="#settings"><span class="nav-icon">⚙</span><span>Settings</span></a>
+      </nav>
+      <div class="sidebar-bottom">
+        <div class="help-card"><span class="help-icon">?</span><div><strong>Need a hand?</strong><small>Open the quick guide</small></div><span>↗</span></div>
+        <div class="operator-row"><div class="avatar">MG</div><div><strong>Campaign operator</strong><small>Online and ready</small></div><button class="icon-button" aria-label="Operator menu">•••</button></div>
       </div>
-    </header>
+    </aside>
 
-    <!-- NEW CAMPAIGN LAUNCHER -->
-    <div class="glass-card campaign-card">
-      <div class="card-header">
-        <div class="card-title">🚀 New Campaign</div>
-        <div class="card-subtitle">Describe who you're targeting — the engine scrapes, audits, and drafts outreach automatically.</div>
-      </div>
-
-      <div class="campaign-form">
-        <div class="form-group form-group-wide">
-          <label class="form-label">Search query <span class="label-hint">(optional — narrows results by business name)</span></label>
-          <div style="display:flex;gap:10px;align-items:center;">
-            <input type="text" class="form-input" id="campaign-query" placeholder="✨ Try: 'fetch real estate businesses in Miami' — AI fills the fields below" style="flex:1;">
-            <button class="btn btn-secondary" id="btn-ai-parse" onclick="aiParseQuery()" title="Let AI extract state, city, and categories from your text">✨ AI Fill</button>
-          </div>
+    <main class="main-content">
+      <header class="topbar">
+        <div class="breadcrumb"><span>Workspace</span><span>/</span><strong>Campaigns</strong></div>
+        <div class="topbar-actions">
+          <div class="connection-status"><span class="status-dot"></span>Engine connected</div>
+          <button class="btn btn-ghost btn-sm" onclick="importCSV()"><span class="btn-symbol">↥</span> Import CSV</button>
+          <button class="btn btn-ghost btn-sm" onclick="exportVerifiedCSV()"><span class="btn-symbol">↓</span> Export</button>
+          <button class="btn btn-soft btn-sm" onclick="sendApprovedEmails()"><span class="btn-symbol">✉</span> Send approved</button>
         </div>
+      </header>
 
-        <div class="form-group">
-          <label class="form-label">State</label>
-          <select class="form-input" id="campaign-state"></select>
+      <section class="page-intro" id="campaign">
+        <div>
+          <div class="eyebrow"><span class="eyebrow-line"></span> Revenue workspace</div>
+          <h1>Launch your next campaign<span class="title-dot">.</span></h1>
+          <p>Describe the businesses you want to reach. LeadGen will discover, audit, and prepare the best opportunities for your review.</p>
         </div>
+        <div class="intro-meta"><span class="meta-icon">✦</span><span><strong>AI-assisted prospecting</strong><small>From search to send-ready in one workspace</small></span></div>
+      </section>
 
-        <div class="form-group">
-          <label class="form-label">City <span class="label-hint">(strongly recommended — state-wide searches are much slower and can time out)</span></label>
-          <input type="text" class="form-input" id="campaign-city" placeholder="e.g. Wilmington">
+      <section class="campaign-card surface-card" aria-labelledby="campaign-title">
+        <div class="section-heading">
+          <div class="section-heading-main"><span class="section-icon cyan-icon">⌁</span><div><h2 id="campaign-title">Campaign brief</h2><p>Start with a plain-language description, then refine the audience.</p></div></div>
+          <span class="step-pill"><span>01</span> Build audience</span>
         </div>
-
-        <div class="form-group form-group-wide">
-          <label class="form-label">Categories <span class="label-hint">(pick one or more — defaults to all)</span></label>
-          <div class="category-picker" id="category-picker"></div>
+        <div class="prompt-wrap">
+          <label class="sr-only" for="campaign-query">Campaign search query</label>
+          <div class="prompt-icon">✦</div>
+          <input type="text" class="prompt-input" id="campaign-query" placeholder="Try “find independent salons in Denver with outdated websites”" autocomplete="off">
+          <button class="btn btn-ai" id="btn-ai-parse" onclick="aiParseQuery()"><span>✦</span> AI Fill</button>
         </div>
-      </div>
-
-      <div class="campaign-footer">
-        <div class="campaign-progress" id="campaign-progress" style="display:none">
-          <div class="progress-bar"><div class="progress-fill" id="campaign-progress-fill"></div></div>
-          <div class="progress-message" id="campaign-progress-message">Starting…</div>
+        <div class="prompt-hint"><span class="hint-check">✓</span> Natural language supported <span class="hint-separator">·</span> AI will suggest location and categories</div>
+        <div class="advanced-toggle-row"><div><span class="filter-icon">☷</span><strong>Audience filters</strong><span class="filter-note">Optional refinements</span></div><button class="text-button" type="button" onclick="document.querySelector('.campaign-form').classList.toggle('is-expanded'); this.classList.toggle('is-open')">Show filters <span>⌄</span></button></div>
+        <div class="campaign-form">
+          <div class="form-group"><label class="form-label" for="campaign-state">State</label><select class="form-input" id="campaign-state"></select></div>
+          <div class="form-group"><label class="form-label" for="campaign-city">City <span class="label-hint">Recommended</span></label><input type="text" class="form-input" id="campaign-city" placeholder="e.g. Wilmington" list="city-suggestions" autocomplete="address-level2"><datalist id="city-suggestions"></datalist></div>
+          <div class="form-group form-group-wide"><label class="form-label">Categories <span class="label-hint">Choose one or more</span></label><div class="category-picker" id="category-picker"></div></div>
         </div>
-        <div class="campaign-actions" style="display:flex;align-items:center;gap:14px;">
-          <label class="cache-toggle" title="Ignore cached results and scrape this area fresh" style="display:flex;align-items:center;gap:6px;font-size:0.85rem;color:var(--text-secondary,#9aa);cursor:pointer;">
-            <input type="checkbox" id="force-refresh-toggle" style="cursor:pointer;">
-            <span>🔄 Force fresh scrape</span>
-          </label>
-          <span id="cache-badge" class="cache-badge" style="font-size:0.8rem;color:var(--text-secondary,#9aa);"></span>
-          <button class="btn btn-primary" id="btn-run-campaign" onclick="runCampaign()">⚡ Run Campaign</button>
+        <div class="campaign-footer">
+          <div class="campaign-progress" id="campaign-progress" style="display:none"><div class="progress-meta"><span class="progress-message" id="campaign-progress-message">Starting…</span><span class="progress-percent" id="campaign-progress-percent">0%</span></div><div class="progress-bar"><div class="progress-fill" id="campaign-progress-fill"></div></div></div>
+          <div class="campaign-actions"><label class="cache-toggle" title="Ignore cached results and scrape this area fresh"><input type="checkbox" id="force-refresh-toggle"><span class="toggle-track"></span><span>Fresh scrape</span></label><span id="cache-badge" class="cache-badge"></span><button class="btn btn-primary btn-run" id="btn-run-campaign" onclick="runCampaign()"><span>✦</span> Run campaign <span class="btn-arrow">→</span></button></div>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <!-- STATS ROW -->
-    <div class="stats-row">
-      <div class="stat-card">
-        <div class="stat-icon">📊</div>
-        <div class="stat-label">Total Leads</div>
-        <div class="stat-value" id="stat-total">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">🌐</div>
-        <div class="stat-label">No Website</div>
-        <div class="stat-value" id="stat-noweb">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">⚠️</div>
-        <div class="stat-label">Website Upgrade</div>
-        <div class="stat-value" id="stat-upgrade">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-icon">✅</div>
-        <div class="stat-label">Verified & Ready</div>
-        <div class="stat-value" id="stat-verified">0</div>
-      </div>
-    </div>
+      <section class="stats-row" id="insights" aria-label="Campaign overview">
+        <div class="stat-card stat-cyan"><div class="stat-top"><span class="stat-icon">▦</span><span class="stat-trend">Live</span></div><div class="stat-label">Total leads</div><div class="stat-value" id="stat-total">0</div><div class="stat-caption">All prospects discovered</div></div>
+        <div class="stat-card stat-mint"><div class="stat-top"><span class="stat-icon">◌</span><span class="stat-trend">Opportunity</span></div><div class="stat-label">No website</div><div class="stat-value" id="stat-noweb">0</div><div class="stat-caption">High-intent outreach paths</div></div>
+        <div class="stat-card stat-violet"><div class="stat-top"><span class="stat-icon">◈</span><span class="stat-trend">Audit signal</span></div><div class="stat-label">Website upgrade</div><div class="stat-value" id="stat-upgrade">0</div><div class="stat-caption">Sites with clear gaps</div></div>
+        <div class="stat-card stat-amber"><div class="stat-top"><span class="stat-icon">✓</span><span class="stat-trend">Ready</span></div><div class="stat-label">Verified & ready</div><div class="stat-value" id="stat-verified">0</div><div class="stat-caption">Approved for dispatch</div></div>
+      </section>
 
-    <!-- MAIN DATA GRID -->
-    <div class="data-grid-container glass-card">
-      <div class="card-header">
-        <div class="card-title">📋 Triage Queue</div>
-      </div>
-      <div class="table-container">
-        <table class="data-table">
-          <thead>
-            <tr>
-              <th>Business Name</th>
-              <th>Contact</th>
-              <th>Strategy</th>
-              <th>Audit Context</th>
-              <th>Action</th>
-            </tr>
-          </thead>
-          <tbody id="leads-tbody">
-            <tr><td colspan="5" style="text-align:center;color:var(--text-tertiary);padding:2rem;">Load pipeline data to begin triage.</td></tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-
+      <section class="queue-card surface-card" id="queue" aria-labelledby="queue-title">
+        <div class="queue-header"><div class="section-heading-main"><span class="section-icon violet-icon">☷</span><div><h2 id="queue-title">Triage queue</h2><p>Review the strongest opportunities and approve outreach when ready.</p></div></div><div class="queue-tools"><button class="btn btn-ghost btn-sm" type="button">⌕ Search</button><button class="btn btn-ghost btn-sm" type="button">☷ Filter</button></div></div>
+        <div class="queue-summary"><span class="queue-live-dot"></span><strong>Review workspace</strong><span class="queue-summary-copy">Your pipeline will appear here after a campaign runs or a CSV is imported.</span></div>
+        <div class="table-container"><table class="data-table"><thead><tr><th>Business</th><th>Contact</th><th>Opportunity</th><th>Audit signal</th><th class="action-head">Action</th></tr></thead><tbody id="leads-tbody"><tr class="empty-row"><td colspan="5"><div class="empty-state"><div class="empty-icon">⌁</div><strong>Your triage queue is ready</strong><span>Run a campaign or import pipeline data to start reviewing leads.</span></div></td></tr></tbody></table></div>
+      </section>
+      <footer class="page-footer"><span>LeadGen OS</span><span>Secure workspace · Updated continuously</span></footer>
+    </main>
   </div>
 
-  <!-- SLIDE-OUT REVIEW PANEL -->
   <div class="slide-panel-overlay" id="review-panel-overlay" onclick="closeReviewPanel()"></div>
-  <div class="slide-panel" id="review-panel">
-    <div class="panel-header">
-      <h3>Email Review</h3>
-      <button class="btn-icon" onclick="closeReviewPanel()">✖</button>
-    </div>
+  <aside class="slide-panel" id="review-panel" role="dialog" aria-modal="true" aria-labelledby="review-panel-title">
+    <div class="panel-header"><div><div class="eyebrow">Outreach workspace</div><h2 id="review-panel-title">Review outreach</h2></div><button class="btn-icon" onclick="closeReviewPanel()" aria-label="Close review panel">×</button></div>
     <div class="panel-body">
-      
-      <div class="review-meta">
-        <h2 id="review-biz-name">Business Name</h2>
-        <div class="badge-container" id="review-strategy-badge"></div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Audit Context</label>
-        <div class="audit-box" id="review-audit-box">No flaws detected.</div>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Subject</label>
-        <input type="text" class="form-input" id="review-subject">
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Email Body</label>
-        <textarea class="form-textarea email-textarea" id="review-body"></textarea>
-        <button class="btn btn-secondary btn-sm" id="btn-regenerate" onclick="regenerateEmail()" style="margin-top:8px;">🔄 Regenerate Email</button>
-      </div>
-
-      <div class="form-group">
-        <label class="form-label">Demo Site URL</label>
-        <div style="display:flex;gap:var(--space-sm);align-items:center">
-          <input type="text" class="form-input code-input" id="review-demo-url" readonly>
-          <a class="btn btn-secondary btn-sm" id="review-demo-link" href="#" target="_blank">↗ View</a>
-        </div>
-      </div>
-
+      <div class="review-meta"><div class="review-avatar">✦</div><div><h3 id="review-biz-name">Business Name</h3><div class="badge-container" id="review-strategy-badge"></div></div></div>
+      <div class="review-callout"><div class="callout-label"><span>⌁</span> Opportunity signal</div><div class="audit-box" id="review-audit-box">No flaws detected.</div></div>
+      <div class="form-group"><label class="form-label" for="review-subject">Subject line</label><input type="text" class="form-input" id="review-subject"></div>
+      <div class="form-group email-group"><div class="field-label-row"><label class="form-label" for="review-body">Email body</label><span class="field-hint">Editable draft</span></div><textarea class="form-textarea email-textarea" id="review-body"></textarea><button class="btn btn-ghost btn-full" id="btn-regenerate" onclick="regenerateEmail()"><span>↻</span> Regenerate draft</button></div>
+      <div class="form-group"><label class="form-label" for="review-demo-url">Personalized demo</label><div class="demo-link-row"><input type="text" class="form-input code-input" id="review-demo-url" readonly><a class="btn btn-secondary btn-sm" id="review-demo-link" href="#" target="_blank" rel="noopener">View ↗</a></div></div>
     </div>
-    <div class="panel-footer">
-      <button class="btn btn-secondary" onclick="closeReviewPanel()">Cancel</button>
-      <button class="btn btn-primary" id="btn-approve" onclick="approveCurrentLead()">✅ Approve & Mark Ready</button>
-    </div>
-  </div>
-
-  <!-- TOAST CONTAINER -->
-  <div class="toast-container" id="toast-container"></div>
-
-  <!-- Hidden file input for CSV import -->
+    <div class="panel-footer"><button class="btn btn-ghost" onclick="closeReviewPanel()">Cancel</button><button class="btn btn-primary" id="btn-approve" onclick="approveCurrentLead()"><span>✓</span> Approve & mark ready</button></div>
+  </aside>
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
   <input type="file" id="csv-file-input" accept=".csv" style="display:none" onchange="handleCSVImport(event)">
-
-  <script src="js/campaign.js?v=20260809c"></script>
-  <script src="js/app.js?v=20260809c"></script>
-
+  <script src="js/campaign.js?v=20260815-light"></script>
+  <script src="js/app.js?v=20260815-light"></script>
 </body>
 </html>
