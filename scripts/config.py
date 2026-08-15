@@ -317,6 +317,12 @@ GMAIL_APP_PASSWORD: str = os.getenv("GMAIL_APP_PASSWORD", "")
 SMTP_HOST: str = "smtp.gmail.com"
 SMTP_PORT: int = 587
 SENDER_NAME: str = os.getenv("SENDER_NAME", "LeadGen Agency")
+# CAN-SPAM Act requires a valid physical postal address in every
+# commercial email — a hard US legal requirement, not a style choice.
+# Set this in .env / Render env vars before sending real campaigns.
+SENDER_PHYSICAL_ADDRESS: str = os.getenv("SENDER_PHYSICAL_ADDRESS", "")
+# Base URL the unsubscribe link points at (your API's own domain).
+API_PUBLIC_BASE_URL: str = os.getenv("API_PUBLIC_BASE_URL", "https://leadgen-engine-ngxx.onrender.com")
 
 # Where "hot lead" engagement alerts (someone opened their personalised
 # demo page) get sent. Defaults to your own sending address so no extra
