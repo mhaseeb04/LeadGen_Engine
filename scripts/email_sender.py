@@ -113,6 +113,25 @@ def send_email(
     msg["To"] = to_addr
     msg["Subject"] = subject
 
+    # ---- CAN-SPAM required footer: real unsubscribe link + physical address ----
+    from config import SENDER_PHYSICAL_ADDRESS, API_PUBLIC_BASE_URL
+    from suppression_list import unsubscribe_token
+    import urllib.parse as _url
+
+    unsub_url = (
+        f"{API_PUBLIC_BASE_URL.rstrip('/')}/api/unsubscribe"
+        f"?email={_url.quote(to_addr)}&token={unsubscribe_token(to_addr)}"
+    )
+    address_line = SENDER_PHYSICAL_ADDRESS or (
+        "[Physical mailing address not configured — set SENDER_PHYSICAL_ADDRESS "
+        "before sending real campaigns; CAN-SPAM requires one in every commercial email.]"
+    )
+    if not SENDER_PHYSICAL_ADDRESS:
+        logger.warning(
+            "SENDER_PHYSICAL_ADDRESS is not set — the outgoing email is NOT "
+            "CAN-SPAM compliant. Set it in .env / Render env vars."
+        )
+
     # ---- Build HTML body ----
     html_body = body.replace("\n", "<br>")
 
@@ -138,16 +157,21 @@ def send_email(
         {button_html}
         <hr style="border:none;border-top:1px solid #e5e7eb;margin:32px 0 16px;">
         <p style="font-size:11px;color:#9ca3af;">
+            {address_line}<br>
             You're receiving this because we thought {sender_name} could help
-            your business. If you'd rather not hear from us, simply reply with
-            "unsubscribe" and we'll remove you immediately.
+            your business. <a href="{unsub_url}" style="color:#9ca3af;">Unsubscribe</a>
+            — you'll be removed immediately and never contacted again.
         </p>
     </body>
     </html>
     """
 
-    # Attach plain-text fallback and HTML version
-    msg.attach(MIMEText(body + "\n\n---\nReply 'unsubscribe' to opt out.", "plain"))
+    # Attach plain-text fallback and HTML version. The plain-text unsubscribe
+    # URL is the SAME real, working link as the HTML version's button —
+    # previously this said "reply unsubscribe", a promise nothing enforced.
+    msg.attach(MIMEText(
+        f"{body}\n\n---\n{address_line}\nUnsubscribe: {unsub_url}", "plain"
+    ))
     msg.attach(MIMEText(html, "html"))
 
     connection.sendmail(from_addr, to_addr, msg.as_string())
@@ -253,6 +277,15 @@ def batch_send(
             # Skip duplicates
             if to_addr in contacted:
                 logger.info("Skipping %s — already contacted.", to_addr)
+                continue
+
+            # CAN-SPAM: never email an address that has unsubscribed, no
+            # matter how it re-entered the pipeline (re-scraped, re-approved,
+            # different campaign, etc.). This is the actual enforcement of
+            # the unsubscribe promise made in every email's footer.
+            from suppression_list import is_suppressed
+            if is_suppressed(to_addr):
+                logger.info("Skipping %s — on the suppression list (unsubscribed).", to_addr)
                 continue
 
             # Daily limit check
