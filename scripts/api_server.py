@@ -75,6 +75,11 @@ try:
     init_cache()
 except Exception:  # noqa: BLE001 — cache is an optimization, never fatal
     logger.warning("Leads cache init skipped.", exc_info=True)
+try:
+    from suppression_list import init_suppression_list
+    init_suppression_list()
+except Exception:  # noqa: BLE001 — must never block startup
+    logger.warning("Suppression list init skipped.", exc_info=True)
 
 API_SECRET_KEY = os.getenv("API_SECRET_KEY", "")
 
@@ -87,7 +92,8 @@ CORS(app)  # dashboard/demo-site are served from different origins during local 
 # ---------------------------------------------------------------------------
 # Authentication Middleware
 # ---------------------------------------------------------------------------
-PUBLIC_PATHS = ["/api/health", "/api/categories", "/api/states", "/api/track", "/api/contact"]
+PUBLIC_PATHS = ["/api/health", "/api/categories", "/api/states", "/api/cities",
+                 "/api/track", "/api/contact", "/api/unsubscribe"]
 
 # Per-IP limiters for the two OPEN endpoints (track/contact). These stay
 # unauthenticated because the demo site calls them from a prospect's
@@ -113,7 +119,7 @@ def _client_ip() -> str:
 @app.before_request
 def check_auth():
     # Rate-limit the OPEN endpoints before doing anything else.
-    if request.path in ("/api/track", "/api/contact"):
+    if request.path in ("/api/track", "/api/contact", "/api/unsubscribe"):
         if not _PUBLIC_LIMITER.allow(_client_ip()):
             resp = jsonify({"error": "Too many requests. Please slow down."})
             resp.status_code = 429
@@ -313,6 +319,61 @@ def track() -> Any:
         ).start()
 
     return jsonify({"status": "tracked", "alerted": should_alert}), 201
+
+
+@app.get("/api/unsubscribe")
+def unsubscribe_endpoint() -> Any:
+    """The link every sent email points to. A recipient clicking this in
+    their inbox has no API key, so this MUST be public — but the signed
+    token means only a link we actually generated for that exact address
+    can suppress it (no one can mass-unsubscribe someone else's leads).
+
+    Returns a small plain-HTML confirmation page (not JSON) since a human
+    is looking at this in a browser, not a script calling the API.
+    """
+    email = (request.args.get("email") or "").strip()
+    token = (request.args.get("token") or "").strip()
+
+    from suppression_list import verify_token, add_suppression
+    if not email or not verify_token(email, token):
+        return (
+            "<html><body style='font-family:sans-serif;padding:40px;text-align:center;'>"
+            "<h2>Invalid or expired unsubscribe link.</h2>"
+            "<p>If you keep receiving unwanted email, please contact us directly.</p>"
+            "</body></html>"
+        ), 400
+
+    add_suppression(email, reason="unsubscribe_link")
+    return (
+        "<html><body style='font-family:sans-serif;padding:40px;text-align:center;'>"
+        f"<h2>You're unsubscribed.</h2>"
+        f"<p><strong>{email}</strong> will not be contacted again.</p>"
+        "</body></html>"
+    ), 200
+
+
+@app.get("/api/suppression/stats")
+def suppression_stats_endpoint() -> Any:
+    """Auth-protected: how many addresses have opted out (dashboard badge)."""
+    try:
+        from suppression_list import suppression_count
+        return jsonify({"suppressed_count": suppression_count()}), 200
+    except Exception as exc:  # noqa: BLE001
+        return jsonify({"error": str(exc)}), 200
+
+
+@app.post("/api/suppression/remove")
+def suppression_remove_endpoint() -> Any:
+    """Auth-protected: manually re-permit an address (e.g. an accidental
+    unsubscribe the business owner reports by phone).
+    """
+    body = request.get_json(force=True, silent=True) or {}
+    email = (body.get("email") or "").strip()
+    if not email:
+        return jsonify({"error": "email is required"}), 400
+    from suppression_list import remove_suppression
+    removed = remove_suppression(email)
+    return jsonify({"removed": removed}), 200
 
 
 @app.get("/api/health")
